@@ -1,0 +1,22 @@
+# Example only. Copy a shipped preset under a NEW preset id and edit the copy.
+# Do not add a second compaction provider beside the original one.
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: lossless-compaction
+      name: dsh-lossless-context
+      config:
+        # These options are forwarded to BasicCompactionEngine.
+        auto: true
+        thresholdRatio: 0.80
+        retainRatio: 0.16
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'

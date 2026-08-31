@@ -1,0 +1,15 @@
+# ILLUSTRATIVE ONLY.
+# Do not append this beside an existing compaction provider.
+# In the actual profile patch, locate the existing compaction node and change
+# that node's plugin name to dsh-lossless-context while preserving its id,
+# isolation boundary, and validated configuration.
+
+- insert:
+    - id: dsh-lossless-context-engine
+      name: dsh-lossless-context
+      disabled: true
+      config: {}
+
+# Keep disabled during development. The exact replace/remove operation depends
+# on the DSH profile's current Cordis tree; verify that only one ctx.compaction
+# provider remains before setting disabled: false.

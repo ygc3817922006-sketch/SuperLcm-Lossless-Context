@@ -1,0 +1,6 @@
+# Safe-by-default bundle layer: install recall/repair tools only.
+# The compaction engine is intentionally NOT auto-mounted because DSH permits
+# only one ctx.compaction provider per isolated agent context. See README.
+- insert:
+    - id: dsh-lossless-context-tools
+      name: dsh-lossless-context/tool

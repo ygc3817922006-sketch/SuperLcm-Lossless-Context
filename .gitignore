@@ -1,0 +1,8 @@
+node_modules/
+*.tgz
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store
+coverage/
+.tmp/

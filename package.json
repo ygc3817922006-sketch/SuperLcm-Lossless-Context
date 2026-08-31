@@ -1,0 +1,68 @@
+{
+  "name": "dsh-lossless-context",
+  "version": "0.1.0-alpha.1",
+  "description": "Lossless-recall hierarchical context compaction for DeepSeek Harness, backed by the durable DSH session log.",
+  "type": "module",
+  "main": "./src/engine.js",
+  "exports": {
+    ".": "./src/engine.js",
+    "./tool": "./src/tool.js",
+    "./core": "./src/core.js",
+    "./marker": "./src/marker.js",
+    "./store": "./src/store.js"
+  },
+  "files": [
+    "src/",
+    "docs/",
+    "examples/",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "cordis.patch.yml",
+    "CHANGELOG.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node ./scripts/test.mjs",
+    "check": "node ./scripts/check.mjs",
+    "validate": "npm run check && npm test",
+    "pack:check": "npm pack --dry-run"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "context-compaction",
+    "lossless-context",
+    "memory",
+    "dag"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ygc3817922006-sketch/dsh-lossless-context.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ygc3817922006-sketch/dsh-lossless-context/issues"
+  },
+  "homepage": "https://github.com/ygc3817922006-sketch/dsh-lossless-context#readme",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-compaction-basic": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-compaction-basic": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  }
+}
