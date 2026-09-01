@@ -22,8 +22,6 @@ await stubPackage('dsh-compaction-basic', `
 export class BasicCompactionEngine {
   constructor(ctx, config = {}) {
     this.ctx = ctx; this.config = config
-    // Mirror the real DSH base: the automatic-compaction hook is invoked
-    // DURING super(), before the subclass's field initializers have run.
     if (typeof this._registerAutomaticCompaction === 'function') this._registerAutomaticCompaction()
   }
   async summarize(input) {
@@ -37,8 +35,6 @@ await stubPackage('dsh-llm', `
 export const CONTEXT_WINDOW_EXCEEDED_CODE = 'CONTEXT_WINDOW_EXCEEDED'
 `)
 await stubPackage('schemastery', `
-// Minimal stand-in for the settings-schema builder surface the engine uses:
-// tests never invoke installSection, so a chainable recorder is enough.
 function node() {
   const self = {
     _default: undefined,
@@ -51,6 +47,7 @@ function node() {
 }
 export default {
   object(dict) { const n = node(); n._dict = dict; return n },
+  string() { return node() },
   number() { return node() },
   percent() { return node() },
   union(list) { const n = node(); n._list = list; return n },
