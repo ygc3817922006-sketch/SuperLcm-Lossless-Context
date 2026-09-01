@@ -29,10 +29,14 @@ test('package exports the backend and all stable library leaves', async () => {
   assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-llm'], '*')
 })
 
-test('web settings expose a free summarizer route and current cache-aware defaults', async () => {
+test('web settings expose an atomic free summarizer route and current cache-aware defaults', async () => {
   const client = await text('lib/client.js')
+  assert.match(client, /summarizationRoute/)
   assert.match(client, /summarizationProvider/)
   assert.match(client, /summarizationModel/)
+  assert.match(client, /scope\.set\("summarizationRoute", desiredRoute\)/)
+  assert.doesNotMatch(client, /scope\.set\("summarizationProvider"/)
+  assert.doesNotMatch(client, /scope\.set\("summarizationModel"/)
   assert.match(client, /foldBatchTokens:\s*64000/)
   assert.match(client, /softActiveTokens:\s*160000/)
   assert.match(client, /hardActiveTokens:\s*220000/)
