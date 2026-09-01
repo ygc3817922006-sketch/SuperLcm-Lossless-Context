@@ -2,13 +2,28 @@
 # Do not append this beside an existing compaction provider.
 # In the actual profile patch, locate the existing compaction node and change
 # that node's plugin name to dsh-lossless-context while preserving its id,
-# isolation boundary, and validated configuration.
+# isolation boundary, and validated base configuration.
+#
+# The values below are starting defaults for a long-lived GPT-5.6 Sol worker.
+# Smaller-context models should use proportionally smaller active-context caps.
 
 - insert:
     - id: dsh-lossless-context-engine
       name: dsh-lossless-context
       disabled: true
-      config: {}
+      config:
+        mode: rolling
+        tailCount: 24
+        minRetainTokens: 32000
+        pressureFoldTokens: 20000
+        foldBatchTokens: 64000
+        softActiveTokens: 160000
+        hardActiveTokens: 220000
+        cacheTtlSeconds: 1800
+        foldTiming: background
+        # Emergency / provider-overflow policy inherited from DSH basic compaction.
+        thresholdRatio: 0.60
+        retainRatio: 0.16
 
 # Keep disabled during development. The exact replace/remove operation depends
 # on the DSH profile's current Cordis tree; verify that only one ctx.compaction
