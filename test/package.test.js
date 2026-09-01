@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'dsh-lossless-context')
-  assert.equal(pkg.version, '0.2.0-alpha.5')
+  assert.equal(pkg.version, '0.2.0-alpha.6')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -25,6 +25,8 @@ test('package exports the backend and all stable library leaves', async () => {
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(pkg.dsh.client.platform, 'web')
   assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-settings-plugins'))
+  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-compaction'], '*')
+  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-llm'], '*')
 })
 
 test('default bundle is safe: tools are mounted but no second compaction provider is auto-mounted', async () => {
