@@ -7,8 +7,8 @@ import { appendRecallEnvelope, extractChildNodeIds } from './marker.js'
 import { selectRollingRange } from './rolling.js'
 import { LosslessStore, resolveDatabasePath } from './store.js'
 
-const ROLLING_CONFIG_KEYS = new Set(['mode', 'tailCount', 'foldBatchTokens'])
-const ROLLING_DEFAULTS = Object.freeze({ mode: 'rolling', tailCount: 24, foldBatchTokens: 20000 })
+const ROLLING_CONFIG_KEYS = new Set(['mode', 'tailCount', 'foldBatchTokens', 'foldTiming'])
+const ROLLING_DEFAULTS = Object.freeze({ mode: 'rolling', tailCount: 24, foldBatchTokens: 20000, foldTiming: 'background' })
 
 function normalizeRolling(config) {
   const raw = config ?? {}
@@ -19,6 +19,7 @@ function normalizeRolling(config) {
     foldBatchTokens: Number.isSafeInteger(raw.foldBatchTokens) && raw.foldBatchTokens > 0
       ? raw.foldBatchTokens
       : ROLLING_DEFAULTS.foldBatchTokens,
+    foldTiming: raw.foldTiming === 'sync' ? 'sync' : ROLLING_DEFAULTS.foldTiming,
   }
 }
 
@@ -115,17 +116,49 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
   _registerRollingPressure() {
     const { ctx } = this
     ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
-      if (!signal.aborted) try {
-        const result = await this.rollingMaintain(agent, signal)
-        if (result !== null && typeof result === 'object' && Array.isArray(result.shadowedSeqs)) {
-          ctx.logger?.info?.(`compaction (rolling): shadowed ${result.shadowedSeqs.length} surface nodes (seqs ${result.shadowedRange.start}-${result.shadowedRange.end}, ~${result.shadowedTokenCount} tokens)`)
+      if (signal.aborted) return next()
+      if (this.rollingConfig.foldTiming === 'sync') {
+        if (!signal.aborted) try {
+          const result = await this.rollingMaintain(agent, signal)
+          this.logFoldResult(ctx, result)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          ctx.logger?.warn?.(`rolling compaction failed: ${message}; continuing the turn`)
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        ctx.logger?.warn?.(`rolling compaction failed: ${message}; continuing the turn`)
+        return next()
       }
+      // Background timing (lossless-claw style): never block the step on a
+      // fold. An in-flight fold from the previous step is awaited first so
+      // two summarizer calls never race for the session's single compaction
+      // lock; the new pass then runs unawaited, hiding its latency under the
+      // current model request and tool execution. The selected span is
+      // seq-stable against concurrent surface appends, and DSH's stability
+      // assertion rejects the commit if anything disturbed it.
+      await this.backgroundFolds?.get(agent)
+      if (!signal.aborted) this.startBackgroundFold(agent)
       return next()
     })
+  }
+
+  startBackgroundFold(agent) {
+    this.backgroundFolds ??= new Map()
+    const fold = this.rollingMaintain(agent)
+      .then((result) => {
+        this.backgroundFolds.delete(agent)
+        this.logFoldResult(this.ctx, result)
+      })
+      .catch((error) => {
+        this.backgroundFolds.delete(agent)
+        const message = error instanceof Error ? error.message : String(error)
+        this.ctx.logger?.warn?.(`rolling compaction (background) failed: ${message}; continuing`)
+      })
+    this.backgroundFolds.set(agent, fold)
+  }
+
+  logFoldResult(ctx, result) {
+    if (result !== null && typeof result === 'object' && Array.isArray(result.shadowedSeqs)) {
+      ctx.logger?.info?.(`compaction (rolling): shadowed ${result.shadowedSeqs.length} surface nodes (seqs ${result.shadowedRange.start}-${result.shadowedRange.end}, ~${result.shadowedTokenCount} tokens)`)
+    }
   }
 
   _registerOverflowRecovery() {

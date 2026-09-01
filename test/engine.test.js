@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import LosslessCompactionEngine from '../src/engine.js'
 import { appendRecallEnvelope, markerFromSummary } from '../src/marker.js'
 
-async function withEngine(run) {
+async function withEngine(run, config = { thresholdRatio: 0.8 }) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-lcm-engine-'))
   const previous = process.env.DSH_LOSSLESS_DB
   process.env.DSH_LOSSLESS_DB = join(dir, 'lcm.sqlite')
@@ -23,7 +23,7 @@ async function withEngine(run) {
       return dispose
     },
   }
-  const engine = new LosslessCompactionEngine(ctx, { thresholdRatio: 0.8 })
+  const engine = new LosslessCompactionEngine(ctx, config)
   try {
     await run({ engine, listeners })
   } finally {
@@ -60,6 +60,67 @@ test('construction survives the base hook firing during super() and defers rolli
   await Promise.resolve() // flush the deferred registration microtask
   assert.equal(typeof listeners.get('agent/pre-step'), 'function')
 }))
+
+test('background foldTiming starts the fold without blocking the step and serializes passes', async () => withEngine(async ({ engine, listeners }) => {
+  await Promise.resolve() // flush the deferred registration microtask
+  const preStep = listeners.get('agent/pre-step')
+  let calls = 0
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  engine.rollingMaintain = async () => {
+    calls += 1
+    return gate.then(() => null)
+  }
+  const request = { agent: {}, signal: { aborted: false } }
+  const next = () => 'next'
+
+  // First pass: the listener resolves (step proceeds) while the fold is still
+  // gated — the fold runs concurrently with the model request. calls === 1
+  // proves the fold was started; the gate being closed proves it did not
+  // block the step.
+  const first = preStep(request, next)
+  assert.equal(await first, 'next')
+  assert.equal(calls, 1)
+
+  release()
+  await first.then(() => Promise.resolve())
+  await new Promise((resolve) => setImmediate(resolve)) // let the fold chain settle
+
+  // Second pass: settles the previous fold, then starts the next one.
+  const second = preStep(request, next)
+  assert.equal(await second, 'next')
+  assert.equal(calls, 2)
+}))
+
+test('background fold failures are contained and do not block the step', async () => withEngine(async ({ engine, listeners }) => {
+  await Promise.resolve()
+  const preStep = listeners.get('agent/pre-step')
+  engine.rollingMaintain = async () => { throw new Error('fold exploded') }
+  const first = preStep({ agent: {}, signal: { aborted: false } }, () => 'next')
+  assert.equal(await first, 'next')
+  // The rejection is swallowed inside the fold chain — awaiting the stored
+  // promise in the next pass must not rethrow.
+  const second = preStep({ agent: {}, signal: { aborted: false } }, () => 'next')
+  assert.equal(await second, 'next')
+}))
+
+test('sync foldTiming keeps the blocking pre-step behavior', async () => withEngine(async ({ engine, listeners }) => {
+  await Promise.resolve()
+  const preStep = listeners.get('agent/pre-step')
+  let released = false
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  engine.rollingMaintain = async () => {
+    await gate
+    released = true
+    return { shadowedSeqs: [1, 2], shadowedRange: { start: 1, end: 2 }, shadowedTokenCount: 42 }
+  }
+  const pending = preStep({ agent: {}, signal: { aborted: false } }, () => 'next')
+  assert.equal(await Promise.race([pending, Promise.resolve('blocked')]), 'blocked')
+  release()
+  assert.equal(await pending, 'next')
+  assert.equal(released, true)
+}, { thresholdRatio: 0.8, foldTiming: 'sync' }))
 
 test('committed compaction events are indexed after the DSH transaction', async () => withEngine(async ({ engine, listeners }) => {
   const summary = appendRecallEnvelope([{ type: 'text', text: 'committed checkpoint' }], {

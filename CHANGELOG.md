@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0-alpha.3 — 2026-09-01
+
+- New rolling option `foldTiming: "background"` (default): lossless-claw style
+  asynchronous folding. The pre-step hook no longer blocks the agent step on a
+  fold — a pending fold from the previous step is settled first (so two
+  summarizer calls never race for the session's single compaction lock), then
+  the new pass runs unawaited, hiding its latency under the current model
+  request and tool execution. DSH's span-stability assertion still rejects the
+  commit if anything disturbs the selected region, and a failed background
+  fold is logged and retried on the next pre-step instead of breaking the turn.
+- `foldTiming: "sync"` restores the previous blocking behavior where the step
+  awaits the fold before the next model request.
+
 ## 0.2.0-alpha.2 — 2026-09-01
 
 - Fix a constructor-timing crash that broke webui startup in a launchd restart
