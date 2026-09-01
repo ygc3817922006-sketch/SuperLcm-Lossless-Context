@@ -13,6 +13,12 @@
       disabled: true
       config:
         mode: rolling
+        # Leave both blank to summarize with the current Agent route.
+        # Set both to use a dedicated compaction model, for example:
+        # summarizationProvider: openai
+        # summarizationModel: gpt-5.6-sol
+        summarizationProvider: ""
+        summarizationModel: ""
         tailCount: 24
         minRetainTokens: 32000
         pressureFoldTokens: 20000
