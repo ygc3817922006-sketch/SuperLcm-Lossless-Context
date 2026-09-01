@@ -4,47 +4,33 @@ A DSH-native lossless-recall context layer inspired by Lossless Claw / Lossless 
 
 It keeps **DeepSeek Harness's append-only session log as the only raw-history source of truth**. Compaction summaries receive stable recall node identifiers; a derived SQLite index records the summary DAG and exact source event sequence numbers. The model can later search, inspect, and expand old context without pretending that a summary is the original text.
 
-> Status: `0.2.0-alpha.1`. Rolling steady-state compaction (lossless-claw style) is implemented; deferred/background compaction, focus briefs, cross-session rollups, embeddings, and a production DSH desktop integration test are still future work.
+> Status: `0.2.0-alpha.6`. Rolling compaction is now cache-aware: routine prefix mutations are deferred while the cache is likely hot, active-context soft/hard caps override that delay, and pressure folds are guaranteed to land synchronously. Exact raw recall remains backed by the DSH event log.
 
 中文说明：[README.zh-CN.md](./README.zh-CN.md)
 
 ## What it does
 
 - Uses the DSH session event log as canonical raw history; the plugin does not copy full transcripts into SQLite.
-- Extends DSH's official `BasicCompactionEngine` and changes only the summary seam.
+- Extends DSH's official `BasicCompactionEngine` and changes only the summary seam plus the automatic rolling admission policy.
 - Adds a stable machine-readable marker to each committed summary.
 - Builds a per-session hierarchical summary DAG from markers found in the compacted span.
 - Keeps forked sessions isolated with the composite identity `(session_id, node_id)`.
 - Recovers exact raw events by sequence number, including lossless pagination inside a single very large event.
 - Rebuilds the entire derived SQLite index from the canonical session log.
-- Exposes six model-facing recall and repair tools:
-  - `lcm_grep`
-  - `lcm_describe`
-  - `lcm_expand`
-  - `lcm_expand_query`
-  - `lcm_reindex`
-  - `lcm_doctor`
+- Exposes six model-facing recall and repair tools: `lcm_grep`, `lcm_describe`, `lcm_expand`, `lcm_expand_query`, `lcm_reindex`, and `lcm_doctor`.
 
 ## Compaction modes
 
 The compaction provider supports two trigger policies via `mode`:
 
-- `mode: "rolling"` (default since 0.2.0) — lossless-claw style steady-state
-  maintenance. Every agent step keeps a fresh verbatim tail of `tailCount`
-  surface nodes and folds the older head into the running summary once it
-  exceeds `foldBatchTokens`. The active surface stays near its budget at all
-  times instead of growing until a one-shot threshold fires, and repeated
-  folds chain summary markers into the multi-level recall DAG (`lcm_describe`
-  reports each node's computed `level`).
-- `mode: "threshold"` — the official one-shot behavior of
-  `BasicCompactionEngine`: compaction fires when measured tokens cross
-  `thresholdRatio` of the routed model's context window, keeping
-  `retainRatio`/`retainTokens` verbatim.
+- `mode: "rolling"` (default) — cache-aware persistent-worker maintenance. The default policy keeps the newest 24 surface nodes and at least 32k recent tokens verbatim. Routine prefix mutation waits for a 64k foldable head and a cold-cache opportunity; a 160k active-context soft cap admits a useful fold from 20k, and a 220k hard cap forces any safe reduction. Soft/hard folds are synchronous even when `foldTiming` is `background`.
+- `mode: "threshold"` — the official one-shot behavior of `BasicCompactionEngine`: compaction fires when measured tokens cross `thresholdRatio` of the routed model's context window, keeping `retainRatio`/`retainTokens` verbatim.
 
-Both modes preserve the official context-overflow recovery (fold on provider
-context-window errors, then retry the request) and reuse the official
-transactional `compactRegion`, including its compaction locks, replay
-validation, and tool-pairing balance guard.
+The cache heuristic uses `cacheTtlSeconds` (default 1800). The first observed model step is treated conservatively as cache-hot; later inter-step gaps inside that TTL defer routine prefix mutation. Set it to `0` to disable cache deferral.
+
+Both modes preserve the official context-overflow recovery and reuse DSH's transactional `compactRegion`, including its compaction lock, replay validation, shrink check, and tool-pairing balance guard.
+
+The complete policy, GPT-5.6 Sol starting values, background-stability limitation, and the deliberate boundary around future 20k leaf summarization are documented in [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md).
 
 ## Non-goals and boundaries
 
@@ -59,6 +45,8 @@ SQLite is a derived index, not a second transcript database. Deleting it loses s
 - Node.js 22.16 or newer (`node:sqlite` is used).
 - A DSH build exposing:
   - `@deepseek-ai/dsh-compaction-basic`
+  - `@deepseek-ai/dsh-compaction`
+  - `@deepseek-ai/dsh-llm`
   - `@deepseek-ai/dsh-tools`
   - the `session/event` lifecycle used by the official compaction stack.
 
@@ -70,8 +58,6 @@ From a local checkout:
 
 ```bash
 npm pack
-# Install the generated .tgz using the package/plugin installation mechanism
-# used by your isolated DSH profile.
 ```
 
 Do not run `pnpm add` blindly inside a production DSH profile if it causes duplicate copies of core DSH packages. DSH runtime services use shared symbols; duplicated core packages can create runtime-instance mismatches. Prefer a dedicated development profile and verify its dependency tree before startup.
@@ -82,25 +68,21 @@ The bundled [`cordis.patch.yml`](./cordis.patch.yml) is deliberately safe by def
 
 ### Stage A — tools only
 
-Install the package in an isolated profile and let the bundled patch load:
-
 ```yaml
 - insert:
     - id: dsh-lossless-context-tools
       name: dsh-lossless-context/tool
 ```
 
-The tools can inspect/reindex LCM-marked summaries. Before this plugin has produced any marked summaries, raw-event search still works but the summary DAG will be empty.
-
 ### Stage B — replace the compaction provider
 
-DSH should have only one compaction provider in an isolated agent context. In the profile's existing compaction node, **replace its plugin name** with:
+DSH should have only one compaction provider in an isolated agent context. In the profile's existing compaction node, replace its plugin name with:
 
 ```yaml
 name: dsh-lossless-context
 ```
 
-Do not append this beside the official basic provider. Preserve the existing node id, isolation boundary, and known-good compaction configuration unless a DSH version change requires otherwise. See [`examples/enable-compaction.patch.yml`](./examples/enable-compaction.patch.yml).
+Do not append this beside the official basic provider. Preserve the existing node id, isolation boundary, and known-good base compaction configuration unless a DSH version change requires otherwise. See [`examples/enable-compaction.patch.yml`](./examples/enable-compaction.patch.yml) for the recommended GPT-5.6 Sol persistent-worker policy.
 
 Keep the plugin disabled until static checks and tests pass in the development profile. Then start a disposable DSH session and verify the sequence in [`docs/VALIDATION.md`](./docs/VALIDATION.md).
 
@@ -149,12 +131,6 @@ Expand exact source events:
 
 When `next` is non-null, call `lcm_expand` again with both cursor fields. This cursor can continue inside one large event, so the middle is not silently discarded.
 
-Repair the derived index:
-
-```json
-{"repair":true}
-```
-
 ## Development
 
 ```bash
@@ -162,13 +138,11 @@ npm run validate
 npm pack --dry-run
 ```
 
-The test runner creates temporary local peer stubs only when `node_modules` is absent, then removes them. It refuses to overwrite a real dependency installation.
-
-Current automated coverage includes marker validation, DAG reconstruction, Unicode search fallback, session/fork isolation, SQLite transactions, exact source pointers, sparse event sequence ids, large-event pagination, tool registration, lifecycle disposal, and failure containment.
+Current automated coverage includes marker validation, DAG reconstruction, Unicode search fallback, session/fork isolation, SQLite transactions, exact source pointers, sparse event sequence ids, large-event pagination, tool registration, lifecycle disposal, failure containment, cache-aware rolling selection, pressure overrides, and background-vs-synchronous admission.
 
 ## Architecture
 
-See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
+See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md).
 
 ## License and attribution
 
