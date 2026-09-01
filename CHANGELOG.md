@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.0-alpha.6 — 2026-09-01
+
+- Rolling mode is now cache-aware instead of rewriting the active prefix for
+  every small batch. The persistent-worker defaults keep 24 recent surface
+  nodes plus at least 32k recent tokens verbatim, use a 64k routine commit
+  batch, and defer routine mutation while the provider cache is likely hot.
+- New pressure boundaries: `softActiveTokens=160000` admits a useful fold once
+  at least `pressureFoldTokens=20000` can be removed; `hardActiveTokens=220000`
+  forces any balanced useful reduction. Under the hard cap only, the 24-node
+  tail preference may relax to one recent node while the 32k token floor and
+  tool-pairing guard remain intact.
+- New `cacheTtlSeconds` heuristic (default 1800): the first observed step is
+  conservatively treated as cache-hot; later inter-step gaps inside the TTL
+  defer routine prefix mutation. `0` disables cache deferral.
+- `foldTiming: "background"` is now limited to opportunistic `cold-batch`
+  folds. Soft/hard pressure folds are synchronous even in background mode so
+  the active-context caps are guaranteed to land before the next model
+  request. Background folds remain fail-closed if DSH's whole-surface
+  stability check observes a concurrent append.
+- Rolling logs include the admission reason, active token estimate, retained
+  tail estimate, and hot/cold cache heuristic.
+- Added `docs/CACHE_POLICY.md` and an explicit GPT-5.6 Sol persistent-worker
+  example. This alpha deliberately does not fake detached 20k leaf summaries;
+  DSH currently exposes one summarizer transaction per `compactRegion()`.
+- Declare the directly imported `@deepseek-ai/dsh-compaction` and
+  `@deepseek-ai/dsh-llm` packages as optional peers, matching the existing
+  duplicate-core avoidance policy.
+
 ## 0.2.0-alpha.5 — 2026-09-01
 
 - Fix a browser load crash ("exports is not defined" → "Failed to load
