@@ -4,44 +4,38 @@
 
 它把 **DSH 只追加的 Session Event Log（会话事件日志）作为唯一原文真源**。每次压缩摘要都会获得稳定的召回节点 ID；SQLite 只保存摘要 DAG（有向无环图）、父子关系和精确的源事件序号。模型以后可以搜索、描述和展开旧上下文，而不是把摘要冒充成原文。
 
-> 当前版本：`0.2.0-alpha.1`。lossless-claw 式的滚动稳态压缩（见下文「压缩模式」）已实现；后台延迟压缩、跨会话归并、向量检索和正式桌面端全链路验收仍未完成。
+> 当前版本：`0.2.0-alpha.6`。rolling（滚动）压缩已经加入 cache-aware（缓存感知）策略：缓存可能仍热时尽量保持前缀不变，active context（活动上下文）达到软/硬上限时再覆盖缓存优先级，压力折叠会同步落地；原始历史仍由 DSH Event Log 无损保留。
 
 ## 已实现
 
 - 原始会话只由 DSH 保存，SQLite 不复制整份 transcript（会话记录）。
-- 继承 DSH 官方 `BasicCompactionEngine`，只改写受保护的摘要接口。
-- 为摘要加入稳定、机器可读的召回标记。
-- 从被压缩区域中识别旧摘要节点，逐级形成摘要 DAG。
+- 继承 DSH 官方 `BasicCompactionEngine`，只改摘要 seam（扩展接口）与 rolling 自动触发策略。
+- 为摘要加入稳定、机器可读的召回标记并形成分层摘要 DAG。
 - 使用 `(session_id, node_id)` 复合身份，父会话和 fork（分叉）子会话不会互相覆盖。
-- 按事件序号精确追回原始事件。
-- 单个超大事件也能通过 `source_offset + event_char_offset` 连续分页，不丢中段。
+- 按事件序号精确追回原始事件；单个超大事件也可连续分页，不丢中段。
 - SQLite 损坏或删除后，可从 DSH 会话事件日志重新建索引。
-- 提供六个工具：
-  - `lcm_grep`：搜摘要和/或原始事件。
-  - `lcm_describe`：查看节点、父子关系、源事件范围和模型信息。
-  - `lcm_expand`：精确展开一个节点引用的原始事件。
-  - `lcm_expand_query`：先搜摘要，再展开命中的原始事件。
-  - `lcm_reindex`：增量刷新或完整重建索引。
-  - `lcm_doctor`：检查 SQLite、重复节点、坏指针和缺失子节点。
+- 提供 `lcm_grep`、`lcm_describe`、`lcm_expand`、`lcm_expand_query`、`lcm_reindex`、`lcm_doctor` 六个召回与修复工具。
 
 ## 压缩模式
 
-压缩 provider 通过 `mode` 提供两种触发策略:
+压缩 provider（提供方）通过 `mode` 提供两种触发策略：
 
-- `mode: "rolling"`(0.2.0 起默认)——lossless-claw 式的稳态维护。每个 agent step 保留最近 `tailCount` 个表面节点逐字不动,更早的头部一旦超过 `foldBatchTokens` 就折叠进运行摘要。活跃表面始终贴近预算,不再等到一次性阈值才触发;反复折叠会把摘要标记串成多级召回 DAG(`lcm_describe` 会报告节点 `level`)。
-- `mode: "threshold"`——官方 `BasicCompactionEngine` 的一次性行为:用量超过路由模型窗口的 `thresholdRatio` 时触发,保留 `retainRatio`/`retainTokens` 逐字不动。
+- `mode: "rolling"`（默认）——面向持久 Worker（工作子代理）的缓存感知维护。默认至少保留最近 24 个 surface node（表面节点）和 32k token 原文；普通前缀改写等待至少 64k 的旧 head，并尽量等缓存变冷。活动上下文达到 160k 后，只要能安全折叠至少 20k 就触发 soft-cap（软门）；达到 220k 后进入 hard-cap（硬门），任何安全且有意义的旧 head 都可以折叠。即使 `foldTiming=background`，soft/hard 压力折叠也会同步完成后才允许下一次模型请求。
+- `mode: "threshold"`——官方 `BasicCompactionEngine` 的一次性行为：用量超过路由模型窗口的 `thresholdRatio` 时触发，并按 `retainRatio`/`retainTokens` 保留近期原文。
 
-两种模式都保留官方的上下文溢出恢复(供应商报窗口超限时先压缩再重试请求),并复用官方事务化 `compactRegion`(含压缩锁、回放校验和工具配对平衡保护)。
+缓存启发式由 `cacheTtlSeconds` 控制，默认 1800 秒。插件加载后第一次观察到的模型 step（步骤）保守视为缓存仍热；之后连续 step 的间隔小于该 TTL 时，普通 rolling 改写会延迟。设置为 `0` 可关闭缓存延迟。
+
+两种模式都保留 DSH 官方的 context-overflow recovery（上下文溢出恢复），并复用官方事务化 `compactRegion`，包括 compaction lock（压缩锁）、replay validation（回放校验）、shrink check（缩减检查）和工具调用配对保护。
+
+完整策略、GPT-5.6 Sol 推荐起始值、后台折叠的稳定性限制，以及为什么当前版本**没有假装实现“20k leaf（叶摘要）+64k commit（表面提交）”**，见 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
 
 ## 与 gbrain 的边界
 
-`dsh-lossless-context` 管“本次 DSH 工作线程到底发生过什么”；gbrain 管跨会话、跨项目的稳定结论、历史决策和长期知识。两边不应自动双写。
-
-只有主代理确认某个结论已经稳定，才应通过单独流程沉淀到 gbrain。LCM 的中间摘要不直接写 gbrain，否则会把临时推理和压缩误差变成长期事实。
+`dsh-lossless-context` 管“本次 DSH 工作线程到底发生过什么”；gbrain 管跨会话、跨项目的稳定结论、历史决策和长期知识。两边不应自动双写。只有主代理确认某个结论已经稳定，才应通过单独流程沉淀到 gbrain。
 
 ## “无损”的准确含义
 
-无损的是原始 DSH 事件及其精确召回路径，不是摘要文本本身。摘要仍可能遗漏或概括错误，因此插件明确保留：
+无损的是原始 DSH 事件及其精确召回路径，不是摘要文本本身：
 
 ```text
 摘要节点 → 精确 source event seq → DSH 原始事件
@@ -54,6 +48,8 @@ SQLite 是可重建的派生索引，不是第二套会话真源。删掉 SQLite
 需要 Node.js 22.16 以上，并要求当前 DSH 版本仍提供：
 
 - `@deepseek-ai/dsh-compaction-basic`
+- `@deepseek-ai/dsh-compaction`
+- `@deepseek-ai/dsh-llm`
 - `@deepseek-ai/dsh-tools`
 - `session/event` 生命周期
 
@@ -64,19 +60,15 @@ npm run validate
 npm pack
 ```
 
-不要在正式 DSH profile 目录中不加检查地执行 `pnpm add`，以免额外安装一份 `dsh-tools`、`dsh-agent-loop`、Cordis 等核心包。DSH 的部分运行时能力依赖共享 Symbol（符号）；同一核心包出现两份实例，可能造成“代码一样但运行时身份不同”。
+不要在正式 DSH profile 目录中不加检查地执行 `pnpm add`，以免额外安装一份 DSH 核心包。DSH 的部分运行时能力依赖共享 Symbol（符号）；同一核心包出现两份实例，可能造成“代码一样但运行时身份不同”。
 
 ### 第一阶段：只挂召回工具
-
-仓库自带的 `cordis.patch.yml` 默认只加载：
 
 ```yaml
 - insert:
     - id: dsh-lossless-context-tools
       name: dsh-lossless-context/tool
 ```
-
-它不会偷偷再挂一套压缩引擎，因此适合先验证工具注册、数据库路径和回放能力。
 
 ### 第二阶段：替换正式压缩提供方
 
@@ -86,9 +78,23 @@ npm pack
 name: dsh-lossless-context
 ```
 
-不能把它和 `dsh-compaction-basic` 并排追加。现有节点 ID、隔离层级和已验证配置应尽量保持不变。示意见 [`examples/enable-compaction.patch.yml`](./examples/enable-compaction.patch.yml)。
+不能把它和 `dsh-compaction-basic` 并排追加。现有节点 ID、隔离层级和已验证的基础配置应尽量保持不变。GPT-5.6 Sol 的持久 Worker 推荐参数见 [`examples/enable-compaction.patch.yml`](./examples/enable-compaction.patch.yml)。
 
-开发期先保持 disabled（禁用）或使用独立 profile；通过静态检查、单测和一次性真实会话验收后再打开。验收顺序见 [`docs/VALIDATION.md`](./docs/VALIDATION.md)。
+## 默认持久 Worker 参数
+
+```yaml
+mode: rolling
+tailCount: 24
+minRetainTokens: 32000
+pressureFoldTokens: 20000
+foldBatchTokens: 64000
+softActiveTokens: 160000
+hardActiveTokens: 220000
+cacheTtlSeconds: 1800
+foldTiming: background
+```
+
+其中 160k/220k 是面向 GPT-5.6 Sol 的起始值，不应不加判断地复制给小上下文模型。`activeTokens` 使用 DSH canonical token meter（规范令牌计量器）的整份真实请求估算，不只是消息正文。
 
 ## 数据库
 
@@ -96,13 +102,6 @@ name: dsh-lossless-context
 
 ```text
 ~/.dsh/lossless-context/lcm.sqlite
-```
-
-可以覆盖：
-
-```bash
-export DSH_HOME=/custom/dsh/home
-export DSH_LOSSLESS_DB=/absolute/path/lcm.sqlite
 ```
 
 数据库启用 WAL（预写日志），保存摘要节点、DAG 边、源事件序号、模型/提供方信息和全文索引，不保存整份原始事件正文。
@@ -114,10 +113,8 @@ npm run validate
 npm pack --dry-run
 ```
 
-测试覆盖：标记编解码、DAG 重建、中英文检索、SQLite 事务、父子会话隔离、稀疏事件序号、单个超大事件连续分页、工具注册、插件卸载关闭数据库，以及索引失败不打断 DSH 主链。
-
-当前测试是代码合同测试，不等于正式 DSH 桌面端全链路证书。alpha 版在正式 profile 启用前必须跑真实 Agent loop（代理循环）验收。
+自动测试覆盖原有无损召回合同，以及缓存感知 rolling、soft/hard 压力覆盖和 background/sync（后台/同步）触发语义。当前测试仍不等于正式 DSH 桌面端全链路证书；alpha 版在正式 profile 启用前必须跑真实 Agent loop（代理循环）验收。
 
 ## 架构
 
-见 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)。
+见 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) 与 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
