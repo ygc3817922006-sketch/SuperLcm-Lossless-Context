@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'dsh-lossless-context')
-  assert.equal(pkg.version, '0.2.0-alpha.6')
+  assert.equal(pkg.version, '0.2.0-alpha.7')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -27,6 +27,15 @@ test('package exports the backend and all stable library leaves', async () => {
   assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-settings-plugins'))
   assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-compaction'], '*')
   assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-llm'], '*')
+})
+
+test('web settings expose a free summarizer route and current cache-aware defaults', async () => {
+  const client = await text('lib/client.js')
+  assert.match(client, /summarizationProvider/)
+  assert.match(client, /summarizationModel/)
+  assert.match(client, /foldBatchTokens:\s*64000/)
+  assert.match(client, /softActiveTokens:\s*160000/)
+  assert.match(client, /hardActiveTokens:\s*220000/)
 })
 
 test('default bundle is safe: tools are mounted but no second compaction provider is auto-mounted', async () => {
