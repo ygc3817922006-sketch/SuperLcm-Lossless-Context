@@ -4,7 +4,7 @@ A DSH-native lossless-recall context layer inspired by Lossless Claw / Lossless 
 
 It keeps **DeepSeek Harness's append-only session log as the only raw-history source of truth**. Compaction summaries receive stable recall node identifiers; a derived SQLite index records the summary DAG and exact source event sequence numbers. The model can later search, inspect, and expand old context without pretending that a summary is the original text.
 
-> Status: `0.2.0-alpha.6`. Rolling compaction is now cache-aware: routine prefix mutations are deferred while the cache is likely hot, active-context soft/hard caps override that delay, and pressure folds are guaranteed to land synchronously. Exact raw recall remains backed by the DSH event log.
+> Status: `0.2.0-alpha.7`. Rolling compaction is cache-aware, and the summarization provider/model can now be selected independently and changed live from the WebUI plugin settings. Exact raw recall remains backed by the DSH event log.
 
 中文说明：[README.zh-CN.md](./README.zh-CN.md)
 
@@ -18,6 +18,21 @@ It keeps **DeepSeek Harness's append-only session log as the only raw-history so
 - Recovers exact raw events by sequence number, including lossless pagination inside a single very large event.
 - Rebuilds the entire derived SQLite index from the canonical session log.
 - Exposes six model-facing recall and repair tools: `lcm_grep`, `lcm_describe`, `lcm_expand`, `lcm_expand_query`, `lcm_reindex`, and `lcm_doctor`.
+
+## Summarizer model
+
+Compaction summaries may use a model different from the main Agent. The plugin directly exposes DSH `BasicCompactionEngine`'s existing `summarizationProvider` / `summarizationModel` route rather than creating a second router.
+
+In WebUI → Plugin configuration → Lossless Context, set both fields to any provider/model IDs routable by the installed DSH adapters, for example:
+
+```text
+Summarizer Provider: openai
+Summarizer Model:    gpt-5.6-sol
+```
+
+Leave **both** fields empty to follow the current Agent route. A dedicated route must set both fields; half-configured provider/model pairs are rejected. Changes apply to subsequent compactions immediately without a plugin restart.
+
+DSH's current browser model directory is session-scoped, so this plugin intentionally does not bind the current conversation's `ModelSelect` to a global compaction setting. The two free-form fields can later become provider/model dropdowns without changing the underlying settings contract once DSH exposes a global model catalog.
 
 ## Compaction modes
 
@@ -138,7 +153,7 @@ npm run validate
 npm pack --dry-run
 ```
 
-Current automated coverage includes marker validation, DAG reconstruction, Unicode search fallback, session/fork isolation, SQLite transactions, exact source pointers, sparse event sequence ids, large-event pagination, tool registration, lifecycle disposal, failure containment, cache-aware rolling selection, pressure overrides, and background-vs-synchronous admission.
+Current automated coverage includes marker validation, DAG reconstruction, Unicode search fallback, session/fork isolation, SQLite transactions, exact source pointers, sparse event sequence ids, large-event pagination, tool registration, lifecycle disposal, failure containment, cache-aware rolling selection, pressure overrides, background-vs-synchronous admission, and live summarizer-route settings validation.
 
 ## Architecture
 

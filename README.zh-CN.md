@@ -4,7 +4,7 @@
 
 它把 **DSH 只追加的 Session Event Log（会话事件日志）作为唯一原文真源**。每次压缩摘要都会获得稳定的召回节点 ID；SQLite 只保存摘要 DAG（有向无环图）、父子关系和精确的源事件序号。模型以后可以搜索、描述和展开旧上下文，而不是把摘要冒充成原文。
 
-> 当前版本：`0.2.0-alpha.6`。rolling（滚动）压缩已经加入 cache-aware（缓存感知）策略：缓存可能仍热时尽量保持前缀不变，active context（活动上下文）达到软/硬上限时再覆盖缓存优先级，压力折叠会同步落地；原始历史仍由 DSH Event Log 无损保留。
+> 当前版本：`0.2.0-alpha.7`。rolling（滚动）压缩使用 cache-aware（缓存感知）策略；压缩摘要模型现在可以独立指定，并可在 WebUI 的插件设置页热更新。原始历史仍由 DSH Event Log 无损保留。
 
 ## 已实现
 
@@ -15,6 +15,21 @@
 - 按事件序号精确追回原始事件；单个超大事件也可连续分页，不丢中段。
 - SQLite 损坏或删除后，可从 DSH 会话事件日志重新建索引。
 - 提供 `lcm_grep`、`lcm_describe`、`lcm_expand`、`lcm_expand_query`、`lcm_reindex`、`lcm_doctor` 六个召回与修复工具。
+
+## 压缩模型
+
+压缩摘要可以使用与主 Agent 不同的模型。插件直接复用 DSH 官方 `BasicCompactionEngine` 的 `summarizationProvider` / `summarizationModel` 路由，不建立第二套路由系统。
+
+在 WebUI → Plugin configuration → Lossless Context 中可以直接填写：
+
+```text
+压缩 Provider: openai
+压缩 Model:    gpt-5.6-sol
+```
+
+两项都留空时，压缩摘要跟随当前 Agent 的实际路由模型；要指定独立压缩模型时必须两项同时填写。字段接受任意当前 DSH adapter 可路由的真实 provider/model ID，插件不会写死模型名单。保存后对后续 compaction 立即生效，不需要重启插件。
+
+DSH 当前的 Web 模型目录是 session-scoped（按会话作用域）的，因此本插件没有把当前聊天会话的 ModelSelect 组件硬绑定到全局压缩配置。等 DSH 提供全局 model catalog 后，可在不改变底层配置合同的前提下把这两个自由文本框升级为联动下拉菜单。
 
 ## 压缩模式
 
@@ -27,7 +42,7 @@
 
 两种模式都保留 DSH 官方的 context-overflow recovery（上下文溢出恢复），并复用官方事务化 `compactRegion`，包括 compaction lock（压缩锁）、replay validation（回放校验）、shrink check（缩减检查）和工具调用配对保护。
 
-完整策略、GPT-5.6 Sol 推荐起始值、后台折叠的稳定性限制，以及为什么当前版本**没有假装实现“20k leaf（叶摘要）+64k commit（表面提交）”**，见 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
+完整策略、GPT-5.6 Sol 推荐起始值、后台折叠的稳定性限制，以及为什么当前版本没有假装实现“20k leaf（叶摘要）+64k commit（表面提交）”，见 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
 
 ## 与 gbrain 的边界
 
@@ -84,6 +99,8 @@ name: dsh-lossless-context
 
 ```yaml
 mode: rolling
+summarizationProvider: ""
+summarizationModel: ""
 tailCount: 24
 minRetainTokens: 32000
 pressureFoldTokens: 20000
@@ -113,7 +130,7 @@ npm run validate
 npm pack --dry-run
 ```
 
-自动测试覆盖原有无损召回合同，以及缓存感知 rolling、soft/hard 压力覆盖和 background/sync（后台/同步）触发语义。当前测试仍不等于正式 DSH 桌面端全链路证书；alpha 版在正式 profile 启用前必须跑真实 Agent loop（代理循环）验收。
+自动测试覆盖原有无损召回合同、缓存感知 rolling、soft/hard 压力覆盖、background/sync（后台/同步）触发语义，以及压缩模型设置的配对校验与热更新。当前测试仍不等于正式 DSH 桌面端全链路证书；alpha 版在正式 profile 启用前必须跑真实 Agent loop（代理循环）验收。
 
 ## 架构
 
