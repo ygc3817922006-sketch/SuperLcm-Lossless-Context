@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0-alpha.2 — 2026-09-01
+
+- Fix a constructor-timing crash that broke webui startup in a launchd restart
+  loop: the DSH base constructor invokes the automatic-compaction hook during
+  `super()`, before the subclass `rollingConfig` field is assigned, so reading
+  `rollingConfig.mode` threw `TypeError`. Registration is now deferred to a
+  microtask that fires after construction; semantics are unchanged.
+- The test-harness stub base now mirrors the real DSH timing (hook invoked
+  during `super()`) and a regression test covers the deferral.
+
 ## 0.2.0-alpha.1 — 2026-09-01
 
 - New `mode: "rolling"` compaction policy (default): lossless-claw style

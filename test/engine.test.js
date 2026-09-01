@@ -50,6 +50,17 @@ test('engine preserves a base summarization failure', async () => withEngine(asy
   await assert.rejects(engine.summarize({ throwFromBase: true }), /base summary failed/)
 }))
 
+test('construction survives the base hook firing during super() and defers rolling registration', async () => withEngine(async ({ listeners }) => {
+  // Regression (2026-09-01 webui crash loop): the real DSH base constructor
+  // invokes _registerAutomaticCompaction() DURING super(), before the
+  // subclass's rollingConfig field is assigned. The stub base mirrors that
+  // timing, so this construction itself would throw
+  // "Cannot read properties of undefined (reading 'mode')" without the
+  // queueMicrotask deferral in the engine hook.
+  await Promise.resolve() // flush the deferred registration microtask
+  assert.equal(typeof listeners.get('agent/pre-step'), 'function')
+}))
+
 test('committed compaction events are indexed after the DSH transaction', async () => withEngine(async ({ engine, listeners }) => {
   const summary = appendRecallEnvelope([{ type: 'text', text: 'committed checkpoint' }], {
     id: 'node-12345678',

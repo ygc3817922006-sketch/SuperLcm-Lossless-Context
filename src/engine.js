@@ -98,6 +98,15 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
    * errors, then retry the request) is preserved unchanged.
    */
   _registerAutomaticCompaction() {
+    if (this.rollingConfig === undefined) {
+      // The base constructor invokes this hook during super(), before subclass
+      // field initializers have run, so `rollingConfig` is not assigned yet.
+      // Re-enqueue the registration as a microtask: it fires after the
+      // synchronous constructor completes, when all fields are set. Semantics
+      // are unchanged — the base auto-trigger policy is still replaced.
+      queueMicrotask(() => this._registerAutomaticCompaction())
+      return
+    }
     if (this.rollingConfig.mode !== 'rolling') return super._registerAutomaticCompaction()
     this._registerRollingPressure()
     this._registerOverflowRecovery()

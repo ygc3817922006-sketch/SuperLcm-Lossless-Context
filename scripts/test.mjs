@@ -20,7 +20,12 @@ export function defineTool(definition) { return definition }
 `)
 await stubPackage('dsh-compaction-basic', `
 export class BasicCompactionEngine {
-  constructor(ctx, config = {}) { this.ctx = ctx; this.config = config }
+  constructor(ctx, config = {}) {
+    this.ctx = ctx; this.config = config
+    // Mirror the real DSH base: the automatic-compaction hook is invoked
+    // DURING super(), before the subclass's field initializers have run.
+    if (typeof this._registerAutomaticCompaction === 'function') this._registerAutomaticCompaction()
+  }
   async summarize(input) {
     if (input?.throwFromBase) throw new Error('base summary failed')
     return { summary: [{ type: 'text', text: input?.baseText ?? 'base checkpoint' }], tokenCount: 7 }
