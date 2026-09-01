@@ -67,9 +67,15 @@ function normalizeRolling(config) {
   }
 }
 
+function cleanRouteValue(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
 const SETTINGS_NAMESPACE = 'lossless-context'
 
 const SETTINGS_SCHEMA = z.object({
+  summarizationProvider: z.string().default(''),
+  summarizationModel: z.string().default(''),
   tailCount: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.tailCount),
   minRetainTokens: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.minRetainTokens),
   pressureFoldTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.pressureFoldTokens),
@@ -103,22 +109,6 @@ function reportIndexFailure(error) {
   console.warn(`[dsh-lossless-context] failed to index committed compaction: ${message}`)
 }
 
-/**
- * DSH-native Lossless Context Management backend.
- *
- * It inherits transaction, retention, cancellation, convergence and
- * surface-replacement behavior from the official BasicCompactionEngine.
- * `summarize()` remains the only summary seam. Rolling mode changes only when
- * a head span is admitted for that official transaction:
- *
- * - keep a recent verbatim tail by BOTH node count and token budget;
- * - defer routine prefix mutation while the model cache is likely hot;
- * - compact opportunistically after cache expiry when the old head reaches a
- *   larger batch;
- * - override cache deferral at soft/hard active-context pressure;
- * - force pressure folds synchronously so the active-context caps do not rely
- *   on speculative background timing.
- */
 export class LosslessCompactionEngine extends BasicCompactionEngine {
   constructor(ctx, config = {}) {
     const { base, rolling } = splitConfig(config)
@@ -136,16 +126,13 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
       }
     })
 
-    this.installSettingsSection(ctx, base)
+    this.installSettingsSection(ctx)
   }
 
-  /**
-   * Expose rolling tunables to the host settings service. The current web card
-   * renders the common fields; advanced cache/pressure fields remain available
-   * through the resolved settings document and host configuration.
-   */
-  installSettingsSection(ctx, base) {
+  installSettingsSection(ctx) {
     const entry = {
+      summarizationProvider: cleanRouteValue(this.config?.summarizationProvider),
+      summarizationModel: cleanRouteValue(this.config?.summarizationModel),
       tailCount: this.rollingConfig.tailCount,
       minRetainTokens: this.rollingConfig.minRetainTokens,
       pressureFoldTokens: this.rollingConfig.pressureFoldTokens,
@@ -154,14 +141,19 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
       hardActiveTokens: this.rollingConfig.hardActiveTokens,
       cacheTtlSeconds: this.rollingConfig.cacheTtlSeconds,
       foldTiming: this.rollingConfig.foldTiming,
-      thresholdRatio: base.thresholdRatio,
-      retainRatio: base.retainRatio,
+      thresholdRatio: this.config?.thresholdRatio ?? 0.6,
+      retainRatio: this.config?.retainRatio ?? 0.16,
     }
     let source = () => entry
     try {
       ctx.inject(['settings'], (settingsCtx) => {
         settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, SETTINGS_SCHEMA, entry, {
           validate: (value) => {
+            const provider = cleanRouteValue(value.summarizationProvider)
+            const model = cleanRouteValue(value.summarizationModel)
+            if ((provider.length === 0) !== (model.length === 0)) {
+              throw new Error('summarizationProvider and summarizationModel must both be set or both be empty')
+            }
             if (value.retainRatio >= value.thresholdRatio) {
               throw new Error(`retainRatio (${value.retainRatio}) must be less than thresholdRatio (${value.thresholdRatio})`)
             }
@@ -188,10 +180,19 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
               cacheTtlSeconds: value.cacheTtlSeconds,
               foldTiming: value.foldTiming,
             })
+            const summarizationProvider = cleanRouteValue(value.summarizationProvider)
+            const summarizationModel = cleanRouteValue(value.summarizationModel)
             const thresholdRatio = value.thresholdRatio
             const retainRatio = value.retainRatio
+            if ((summarizationProvider.length === 0) !== (summarizationModel.length === 0)) return
             if (retainRatio >= thresholdRatio) return
-            const nextConfig = { ...this.config, thresholdRatio, retainRatio }
+            const nextConfig = {
+              ...this.config,
+              summarizationProvider,
+              summarizationModel,
+              thresholdRatio,
+              retainRatio,
+            }
             delete nextConfig.retainTokens
             this.config = nextConfig
           },
