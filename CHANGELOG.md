@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0-alpha.5 — 2026-09-01
+
+- Fix a browser load crash ("exports is not defined" → "Failed to load
+  plugins"): the module-loader convention is for the `factory(require)` body
+  to build its own CJS export object, and the packaged bundle omitted the
+  declarations. The factory now opens with `var module = { exports: {} };
+  var exports = module.exports;` (plus a `Symbol.toStringTag` Module tag) so
+  the trailing `exports.*` assignments and `return module.exports` resolve.
+  Merged back from the hot-patched profile copy after alpha.4 took the webui
+  down at first load.
+
 ## 0.2.0-alpha.4 — 2026-09-01
 
 - Web settings page: the plugin now appears as a card under Plugin

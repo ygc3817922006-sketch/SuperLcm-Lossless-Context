@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'dsh-lossless-context')
-  assert.equal(pkg.version, '0.2.0-alpha.4')
+  assert.equal(pkg.version, '0.2.0-alpha.5')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
