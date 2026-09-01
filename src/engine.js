@@ -8,18 +8,61 @@ import { appendRecallEnvelope, extractChildNodeIds } from './marker.js'
 import { selectRollingRange } from './rolling.js'
 import { LosslessStore, resolveDatabasePath } from './store.js'
 
-const ROLLING_CONFIG_KEYS = new Set(['mode', 'tailCount', 'foldBatchTokens', 'foldTiming'])
-const ROLLING_DEFAULTS = Object.freeze({ mode: 'rolling', tailCount: 24, foldBatchTokens: 20000, foldTiming: 'background' })
+const ROLLING_CONFIG_KEYS = new Set([
+  'mode',
+  'tailCount',
+  'minRetainTokens',
+  'pressureFoldTokens',
+  'foldBatchTokens',
+  'softActiveTokens',
+  'hardActiveTokens',
+  'cacheTtlSeconds',
+  'foldTiming',
+])
+
+const ROLLING_DEFAULTS = Object.freeze({
+  mode: 'rolling',
+  tailCount: 24,
+  minRetainTokens: 32000,
+  pressureFoldTokens: 20000,
+  foldBatchTokens: 64000,
+  softActiveTokens: 160000,
+  hardActiveTokens: 220000,
+  cacheTtlSeconds: 1800,
+  foldTiming: 'background',
+})
+
+function positiveInteger(value, fallback) {
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback
+}
+
+function nonNegativeInteger(value, fallback) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : fallback
+}
 
 function normalizeRolling(config) {
   const raw = config ?? {}
   const mode = raw.mode === 'threshold' ? 'threshold' : 'rolling'
+  const foldBatchTokens = positiveInteger(raw.foldBatchTokens, ROLLING_DEFAULTS.foldBatchTokens)
+  const pressureFoldTokens = Math.min(
+    positiveInteger(raw.pressureFoldTokens, ROLLING_DEFAULTS.pressureFoldTokens),
+    foldBatchTokens,
+  )
+  const softActiveTokens = positiveInteger(raw.softActiveTokens, ROLLING_DEFAULTS.softActiveTokens)
+  const requestedHardActiveTokens = positiveInteger(raw.hardActiveTokens, ROLLING_DEFAULTS.hardActiveTokens)
+  const hardActiveTokens = requestedHardActiveTokens > softActiveTokens
+    ? requestedHardActiveTokens
+    : softActiveTokens + 1
+
   return {
     mode,
-    tailCount: Number.isSafeInteger(raw.tailCount) && raw.tailCount > 0 ? raw.tailCount : ROLLING_DEFAULTS.tailCount,
-    foldBatchTokens: Number.isSafeInteger(raw.foldBatchTokens) && raw.foldBatchTokens > 0
-      ? raw.foldBatchTokens
-      : ROLLING_DEFAULTS.foldBatchTokens,
+    tailCount: positiveInteger(raw.tailCount, ROLLING_DEFAULTS.tailCount),
+    minRetainTokens: nonNegativeInteger(raw.minRetainTokens, ROLLING_DEFAULTS.minRetainTokens),
+    pressureFoldTokens,
+    foldBatchTokens,
+    softActiveTokens,
+    hardActiveTokens,
+    cacheTtlSeconds: nonNegativeInteger(raw.cacheTtlSeconds, ROLLING_DEFAULTS.cacheTtlSeconds),
     foldTiming: raw.foldTiming === 'sync' ? 'sync' : ROLLING_DEFAULTS.foldTiming,
   }
 }
@@ -28,7 +71,12 @@ const SETTINGS_NAMESPACE = 'lossless-context'
 
 const SETTINGS_SCHEMA = z.object({
   tailCount: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.tailCount),
+  minRetainTokens: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.minRetainTokens),
+  pressureFoldTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.pressureFoldTokens),
   foldBatchTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.foldBatchTokens),
+  softActiveTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.softActiveTokens),
+  hardActiveTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.hardActiveTokens),
+  cacheTtlSeconds: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.cacheTtlSeconds),
   foldTiming: z.union([z.const('background'), z.const('sync')]).default(ROLLING_DEFAULTS.foldTiming),
   thresholdRatio: z.percent().default(0.6),
   retainRatio: z.percent().default(0.16),
@@ -58,18 +106,18 @@ function reportIndexFailure(error) {
 /**
  * DSH-native Lossless Context Management backend.
  *
- * It inherits transaction, pressure, retention, cancellation, convergence and
- * surface-replacement behavior from the official BasicCompactionEngine. The
- * overridden seams are summarize() (stable node markers and DAG edges) and the
- * automatic trigger policy:
+ * It inherits transaction, retention, cancellation, convergence and
+ * surface-replacement behavior from the official BasicCompactionEngine.
+ * `summarize()` remains the only summary seam. Rolling mode changes only when
+ * a head span is admitted for that official transaction:
  *
- * - mode "rolling" (default): lossless-claw style steady-state maintenance.
- *   Every agent step keeps a fresh verbatim tail of tailCount surface nodes
- *   and folds the older head into the running summary once it exceeds
- *   foldBatchTokens. Repeated folds chain summary markers into a multi-level
- *   recall DAG, and the active surface never crosses the budget.
- * - mode "threshold": the official one-shot behavior — compaction fires once
- *   when measured tokens cross thresholdRatio of the model window.
+ * - keep a recent verbatim tail by BOTH node count and token budget;
+ * - defer routine prefix mutation while the model cache is likely hot;
+ * - compact opportunistically after cache expiry when the old head reaches a
+ *   larger batch;
+ * - override cache deferral at soft/hard active-context pressure;
+ * - force pressure folds synchronously so the active-context caps do not rely
+ *   on speculative background timing.
  */
 export class LosslessCompactionEngine extends BasicCompactionEngine {
   constructor(ctx, config = {}) {
@@ -92,16 +140,19 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
   }
 
   /**
-   * Expose the rolling tunables on the settings page. The composition entry
-   * stays authoritative while no settings provider (or user layer) exists;
-   * once one is mounted, its resolved value is applied live on every change.
-   * `mode` is deliberately cordis-only: switching it requires re-registering
-   * the pressure hooks, so it only applies on plugin load.
+   * Expose rolling tunables to the host settings service. The current web card
+   * renders the common fields; advanced cache/pressure fields remain available
+   * through the resolved settings document and host configuration.
    */
   installSettingsSection(ctx, base) {
     const entry = {
       tailCount: this.rollingConfig.tailCount,
+      minRetainTokens: this.rollingConfig.minRetainTokens,
+      pressureFoldTokens: this.rollingConfig.pressureFoldTokens,
       foldBatchTokens: this.rollingConfig.foldBatchTokens,
+      softActiveTokens: this.rollingConfig.softActiveTokens,
+      hardActiveTokens: this.rollingConfig.hardActiveTokens,
+      cacheTtlSeconds: this.rollingConfig.cacheTtlSeconds,
       foldTiming: this.rollingConfig.foldTiming,
       thresholdRatio: base.thresholdRatio,
       retainRatio: base.retainRatio,
@@ -114,6 +165,12 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
             if (value.retainRatio >= value.thresholdRatio) {
               throw new Error(`retainRatio (${value.retainRatio}) must be less than thresholdRatio (${value.thresholdRatio})`)
             }
+            if (value.pressureFoldTokens > value.foldBatchTokens) {
+              throw new Error(`pressureFoldTokens (${value.pressureFoldTokens}) must not exceed foldBatchTokens (${value.foldBatchTokens})`)
+            }
+            if (value.hardActiveTokens <= value.softActiveTokens) {
+              throw new Error(`hardActiveTokens (${value.hardActiveTokens}) must be greater than softActiveTokens (${value.softActiveTokens})`)
+            }
           },
           setSource: (current) => {
             source = current
@@ -123,15 +180,17 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
             this.rollingConfig = normalizeRolling({
               ...this.rollingConfig,
               tailCount: value.tailCount,
+              minRetainTokens: value.minRetainTokens,
+              pressureFoldTokens: value.pressureFoldTokens,
               foldBatchTokens: value.foldBatchTokens,
+              softActiveTokens: value.softActiveTokens,
+              hardActiveTokens: value.hardActiveTokens,
+              cacheTtlSeconds: value.cacheTtlSeconds,
               foldTiming: value.foldTiming,
             })
             const thresholdRatio = value.thresholdRatio
             const retainRatio = value.retainRatio
             if (retainRatio >= thresholdRatio) return
-            // this.config is frozen; spread-replace so the base engine's live
-            // reads (resolveTargetPolicy) observe the new ratios. Drop a
-            // token-based retention form so the ratio takes effect.
             const nextConfig = { ...this.config, thresholdRatio, retainRatio }
             delete nextConfig.retainTokens
             this.config = nextConfig
@@ -159,18 +218,8 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
     }
   }
 
-  /**
-   * Swap the official automatic trigger policy for the rolling one. The
-   * official context-overflow recovery (fold on provider context-window
-   * errors, then retry the request) is preserved unchanged.
-   */
   _registerAutomaticCompaction() {
     if (this.rollingConfig === undefined) {
-      // The base constructor invokes this hook during super(), before subclass
-      // field initializers have run, so `rollingConfig` is not assigned yet.
-      // Re-enqueue the registration as a microtask: it fires after the
-      // synchronous constructor completes, when all fields are set. Semantics
-      // are unchanged — the base auto-trigger policy is still replaced.
       queueMicrotask(() => this._registerAutomaticCompaction())
       return
     }
@@ -179,42 +228,70 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
     this._registerOverflowRecovery()
   }
 
+  currentTimeMs() {
+    return Date.now()
+  }
+
+  cacheHotFor(agent) {
+    this.lastPreStepAt ??= new WeakMap()
+    const now = this.currentTimeMs()
+    const previous = this.lastPreStepAt.get(agent)
+    this.lastPreStepAt.set(agent, now)
+    const ttlMs = this.rollingConfig.cacheTtlSeconds * 1000
+    if (ttlMs <= 0) return false
+    if (previous === undefined) return true
+    return now - previous < ttlMs
+  }
+
   _registerRollingPressure() {
     const { ctx } = this
     ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
       if (signal.aborted) return next()
-      if (this.rollingConfig.foldTiming === 'sync') {
-        if (!signal.aborted) try {
-          const result = await this.rollingMaintain(agent, signal)
-          this.logFoldResult(ctx, result)
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          ctx.logger?.warn?.(`rolling compaction failed: ${message}; continuing the turn`)
-        }
+      await this.settleBackgroundFold(agent)
+      if (signal.aborted) return next()
+
+      const cacheHot = this.cacheHotFor(agent)
+      let selection
+      try {
+        selection = this.planRolling(agent, cacheHot)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        ctx.logger?.warn?.(`rolling selection failed: ${message}; continuing the turn`)
         return next()
       }
-      // Background timing (lossless-claw style): never block the step on a
-      // fold. An in-flight fold from the previous step is awaited first so
-      // two summarizer calls never race for the session's single compaction
-      // lock; the new pass then runs unawaited, hiding its latency under the
-      // current model request and tool execution. The selected span is
-      // seq-stable against concurrent surface appends, and DSH's stability
-      // assertion rejects the commit if anything disturbed it.
-      await this.backgroundFolds?.get(agent)
-      if (!signal.aborted) this.startBackgroundFold(agent)
+      if (selection === null) return next()
+
+      if (this.rollingConfig.foldTiming === 'background' && selection.reason === 'cold-batch') {
+        this.startBackgroundFold(agent, selection, signal)
+        return next()
+      }
+
+      try {
+        const result = await this.commitRollingSelection(agent, selection, signal)
+        this.logFoldResult(ctx, result)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        ctx.logger?.warn?.(`rolling compaction failed: ${message}; continuing the turn`)
+      }
       return next()
     })
   }
 
-  startBackgroundFold(agent) {
+  async settleBackgroundFold(agent) {
+    const pending = this.backgroundFolds?.get(agent)
+    if (pending !== undefined) await pending
+  }
+
+  startBackgroundFold(agent, selection, signal) {
     this.backgroundFolds ??= new Map()
-    const fold = this.rollingMaintain(agent)
+    const fold = this.commitRollingSelection(agent, selection, signal)
       .then((result) => {
         this.backgroundFolds.delete(agent)
         this.logFoldResult(this.ctx, result)
       })
       .catch((error) => {
         this.backgroundFolds.delete(agent)
+        if (signal?.aborted) return
         const message = error instanceof Error ? error.message : String(error)
         this.ctx.logger?.warn?.(`rolling compaction (background) failed: ${message}; continuing`)
       })
@@ -223,7 +300,15 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
 
   logFoldResult(ctx, result) {
     if (result !== null && typeof result === 'object' && Array.isArray(result.shadowedSeqs)) {
-      ctx.logger?.info?.(`compaction (rolling): shadowed ${result.shadowedSeqs.length} surface nodes (seqs ${result.shadowedRange.start}-${result.shadowedRange.end}, ~${result.shadowedTokenCount} tokens)`)
+      const policy = result.rollingPolicy
+      const detail = policy === undefined
+        ? ''
+        : `, reason=${policy.reason}, active~${policy.activeTokens}, tail~${policy.tailTokens}, cache=${policy.cacheHot ? 'hot' : 'cold'}`
+      ctx.logger?.info?.(
+        `compaction (rolling): shadowed ${result.shadowedSeqs.length} surface nodes `
+        + `(seqs ${result.shadowedRange.start}-${result.shadowedRange.end}, `
+        + `~${result.shadowedTokenCount} tokens${detail})`,
+      )
     }
   }
 
@@ -263,24 +348,31 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
     })
   }
 
-  /**
-   * One rolling maintenance pass: keep the configured fresh tail verbatim and
-   * fold the older head into the running summary when it exceeds the batch
-   * floor. Uses the official transactional compactRegion so durability,
-   * compaction locks, replay validation and the summarizer hook stay identical
-   * to the built-in engine.
-   */
-  async rollingMaintain(agent, signal) {
+  planRolling(agent, cacheHot = false) {
     const session = agent.session
-    const meter = this.ctx.tokenMeter
-    const measurement = meter.measure(session)
-    const selection = selectRollingRange(measurement.nodes, session.surface.nodes, {
+    const measurement = this.ctx.tokenMeter.measure(session)
+    return selectRollingRange(measurement.nodes, session.surface.nodes, {
       tailCount: this.rollingConfig.tailCount,
+      minRetainTokens: this.rollingConfig.minRetainTokens,
+      pressureFoldTokens: this.rollingConfig.pressureFoldTokens,
       foldBatchTokens: this.rollingConfig.foldBatchTokens,
+      softActiveTokens: this.rollingConfig.softActiveTokens,
+      hardActiveTokens: this.rollingConfig.hardActiveTokens,
+      activeTokens: measurement.totalTokens,
+      cacheHot,
       isBalancedBefore: (seq) => toolPairingBalancedBefore(session, seq),
     })
+  }
+
+  async commitRollingSelection(agent, selection, signal) {
+    const result = await this.compactRegion(selection.start, selection.end, agent, signal)
+    return { ...result, rollingPolicy: selection }
+  }
+
+  async rollingMaintain(agent, signal, options = {}) {
+    const selection = this.planRolling(agent, options.cacheHot === true)
     if (selection === null) return null
-    return this.compactRegion(selection.start, selection.end, agent, signal)
+    return this.commitRollingSelection(agent, selection, signal)
   }
 }
 
