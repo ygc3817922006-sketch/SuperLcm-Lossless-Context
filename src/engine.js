@@ -71,11 +71,25 @@ function cleanRouteValue(value) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function cleanRoute(route) {
+  return {
+    provider: cleanRouteValue(route?.provider),
+    model: cleanRouteValue(route?.model),
+  }
+}
+
+function routeIsComplete(route) {
+  return (route.provider.length === 0) === (route.model.length === 0)
+}
+
 const SETTINGS_NAMESPACE = 'lossless-context'
+const SUMMARIZATION_ROUTE_SCHEMA = z.object({
+  provider: z.string().default(''),
+  model: z.string().default(''),
+}).default({ provider: '', model: '' })
 
 const SETTINGS_SCHEMA = z.object({
-  summarizationProvider: z.string().default(''),
-  summarizationModel: z.string().default(''),
+  summarizationRoute: SUMMARIZATION_ROUTE_SCHEMA,
   tailCount: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.tailCount),
   minRetainTokens: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.minRetainTokens),
   pressureFoldTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.pressureFoldTokens),
@@ -131,8 +145,10 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
 
   installSettingsSection(ctx) {
     const entry = {
-      summarizationProvider: cleanRouteValue(this.config?.summarizationProvider),
-      summarizationModel: cleanRouteValue(this.config?.summarizationModel),
+      summarizationRoute: cleanRoute({
+        provider: this.config?.summarizationProvider,
+        model: this.config?.summarizationModel,
+      }),
       tailCount: this.rollingConfig.tailCount,
       minRetainTokens: this.rollingConfig.minRetainTokens,
       pressureFoldTokens: this.rollingConfig.pressureFoldTokens,
@@ -149,10 +165,9 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
       ctx.inject(['settings'], (settingsCtx) => {
         settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, SETTINGS_SCHEMA, entry, {
           validate: (value) => {
-            const provider = cleanRouteValue(value.summarizationProvider)
-            const model = cleanRouteValue(value.summarizationModel)
-            if ((provider.length === 0) !== (model.length === 0)) {
-              throw new Error('summarizationProvider and summarizationModel must both be set or both be empty')
+            const route = cleanRoute(value.summarizationRoute)
+            if (!routeIsComplete(route)) {
+              throw new Error('summarization route provider and model must both be set or both be empty')
             }
             if (value.retainRatio >= value.thresholdRatio) {
               throw new Error(`retainRatio (${value.retainRatio}) must be less than thresholdRatio (${value.thresholdRatio})`)
@@ -169,6 +184,9 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
           },
           onChange: () => {
             const value = source()
+            const route = cleanRoute(value.summarizationRoute)
+            if (!routeIsComplete(route)) return
+
             this.rollingConfig = normalizeRolling({
               ...this.rollingConfig,
               tailCount: value.tailCount,
@@ -180,16 +198,13 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
               cacheTtlSeconds: value.cacheTtlSeconds,
               foldTiming: value.foldTiming,
             })
-            const summarizationProvider = cleanRouteValue(value.summarizationProvider)
-            const summarizationModel = cleanRouteValue(value.summarizationModel)
             const thresholdRatio = value.thresholdRatio
             const retainRatio = value.retainRatio
-            if ((summarizationProvider.length === 0) !== (summarizationModel.length === 0)) return
             if (retainRatio >= thresholdRatio) return
             const nextConfig = {
               ...this.config,
-              summarizationProvider,
-              summarizationModel,
+              summarizationProvider: route.provider,
+              summarizationModel: route.model,
               thresholdRatio,
               retainRatio,
             }
