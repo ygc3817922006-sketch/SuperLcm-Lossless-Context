@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0-alpha.7 — 2026-09-01
+
+- Expose DSH's native `summarizationProvider` / `summarizationModel` route through
+  the lossless-context settings section. Both blank means “follow the current
+  Agent”; a dedicated summarizer requires both fields and applies live to later
+  compactions without plugin reload.
+- The WebUI plugin card now exposes the summarizer provider/model as free-form
+  adapter IDs, plus the complete cache-aware rolling policy. It deliberately
+  avoids binding the session-scoped conversation ModelSelect to this global
+  compaction setting.
+- Align WebUI fallbacks with the alpha.6 engine defaults: 32k fresh-token floor,
+  20k pressure reduction, 64k routine batch, 160k/220k soft/hard caps, and a
+  1800-second cache heuristic. The old browser-only 20k routine default is gone.
+- Reject half-configured summarizer routes and add live-settings tests. The test
+  schema stub now supports strings, and syntax validation includes `lib/` so a
+  broken browser bundle fails CI before packaging.
+
 ## 0.2.0-alpha.6 — 2026-09-01
 
 - Rolling mode is now cache-aware instead of rewriting the active prefix for
