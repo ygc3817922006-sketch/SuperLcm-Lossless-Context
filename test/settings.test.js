@@ -27,8 +27,12 @@ async function withSettingsEngine(run) {
       callback({
         settings: {
           installSection(_owner, namespace, _schema, entry, options) {
-            source = { ...entry }
-            installed = { namespace, entry: { ...entry }, options }
+            source = { ...entry, summarizationRoute: { ...entry.summarizationRoute } }
+            installed = {
+              namespace,
+              entry: { ...entry, summarizationRoute: { ...entry.summarizationRoute } },
+              options,
+            }
             options.setSource(() => source)
           },
         },
@@ -58,29 +62,25 @@ async function withSettingsEngine(run) {
   }
 }
 
-test('summarizer route defaults to follow-agent and requires a complete pair', async () => withSettingsEngine(async ({ installed, getSource }) => {
+test('summarizer route defaults to follow-agent and requires an atomic complete pair', async () => withSettingsEngine(async ({ installed, getSource }) => {
   assert.equal(installed.namespace, 'lossless-context')
-  assert.equal(installed.entry.summarizationProvider, '')
-  assert.equal(installed.entry.summarizationModel, '')
+  assert.deepEqual(installed.entry.summarizationRoute, { provider: '', model: '' })
 
   assert.throws(() => installed.options.validate({
     ...getSource(),
-    summarizationProvider: 'openai',
-    summarizationModel: '',
+    summarizationRoute: { provider: 'openai', model: '' },
   }), /must both be set or both be empty/)
 
   assert.doesNotThrow(() => installed.options.validate({
     ...getSource(),
-    summarizationProvider: '',
-    summarizationModel: '',
+    summarizationRoute: { provider: '', model: '' },
   }))
 }))
 
-test('summarizer route applies live and blank pair restores follow-agent behavior', async () => withSettingsEngine(async ({ engine, installed, getSource, setSource }) => {
+test('atomic summarizer route applies live and blank route restores follow-agent behavior', async () => withSettingsEngine(async ({ engine, installed, getSource, setSource }) => {
   const dedicated = {
     ...getSource(),
-    summarizationProvider: '  openai  ',
-    summarizationModel: '  gpt-5.6-sol  ',
+    summarizationRoute: { provider: '  openai  ', model: '  gpt-5.6-sol  ' },
   }
   installed.options.validate(dedicated)
   setSource(dedicated)
@@ -89,10 +89,20 @@ test('summarizer route applies live and blank pair restores follow-agent behavio
   assert.equal(engine.config.summarizationProvider, 'openai')
   assert.equal(engine.config.summarizationModel, 'gpt-5.6-sol')
 
+  const switched = {
+    ...getSource(),
+    summarizationRoute: { provider: 'anthropic', model: 'claude-opus-5' },
+  }
+  installed.options.validate(switched)
+  setSource(switched)
+  installed.options.onChange()
+
+  assert.equal(engine.config.summarizationProvider, 'anthropic')
+  assert.equal(engine.config.summarizationModel, 'claude-opus-5')
+
   const followAgent = {
     ...getSource(),
-    summarizationProvider: '',
-    summarizationModel: '',
+    summarizationRoute: { provider: '', model: '' },
   }
   installed.options.validate(followAgent)
   setSource(followAgent)
