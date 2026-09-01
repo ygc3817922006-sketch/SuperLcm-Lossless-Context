@@ -28,6 +28,16 @@ export class BasicCompactionEngine {
 }
 export default BasicCompactionEngine
 `)
+await stubPackage('dsh-llm', `
+export const CONTEXT_WINDOW_EXCEEDED_CODE = 'CONTEXT_WINDOW_EXCEEDED'
+`)
+await stubPackage('dsh-compaction', `
+export function toolPairingBalancedBefore() { return true }
+export function toolPairingBalancedAfter() { return true }
+export function compactCheckpointSource() { return null }
+export const ManualCompactionError = class ManualCompactionError extends Error {}
+export const CompactionId = (value) => value
+`)
 
 const tests = (await readdir(join(root, 'test')))
   .filter(name => name.endsWith('.test.js'))

@@ -117,6 +117,22 @@ function requireNode(store, sessionId, nodeId) {
   return node
 }
 
+/**
+ * Depth of one node in the recall DAG: level 1 for raw fold checkpoints, and
+ * one above the deepest child otherwise. Cycle-safe for corrupted indexes.
+ */
+export function nodeLevel(store, sessionId, nodeId) {
+  const seen = new Set()
+  const levelOf = (id) => {
+    if (seen.has(id)) return 1
+    seen.add(id)
+    const children = store.childrenOf(sessionId, id)
+    if (children.length === 0) return 1
+    return 1 + Math.max(...children.map(levelOf))
+  }
+  return levelOf(nodeId)
+}
+
 export function describeNode(store, session, nodeId) {
   const sessionId = sessionIdOf(session)
   const node = requireNode(store, sessionId, nodeId)
@@ -126,6 +142,7 @@ export function describeNode(store, session, nodeId) {
     compactionId: node.compactionId,
     summarySeq: node.summarySeq,
     createdAt: node.createdAt,
+    level: nodeLevel(store, sessionId, node.nodeId),
     provider: node.provider,
     model: node.model,
     status: node.status,

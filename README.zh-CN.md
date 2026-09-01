@@ -4,7 +4,7 @@
 
 它把 **DSH 只追加的 Session Event Log（会话事件日志）作为唯一原文真源**。每次压缩摘要都会获得稳定的召回节点 ID；SQLite 只保存摘要 DAG（有向无环图）、父子关系和精确的源事件序号。模型以后可以搜索、描述和展开旧上下文，而不是把摘要冒充成原文。
 
-> 当前版本：`0.1.0-alpha.1`。这是“无损召回架构”的可运行最小适配版，不等于完整 Lossless Claw 的全部能力。后台延迟压缩、focus brief（焦点简报）、跨会话 rollup（归并）、embedding（向量检索）和正式 DSH 桌面端全链路验收仍未完成。
+> 当前版本：`0.2.0-alpha.1`。lossless-claw 式的滚动稳态压缩（见下文「压缩模式」）已实现；后台延迟压缩、跨会话归并、向量检索和正式桌面端全链路验收仍未完成。
 
 ## 已实现
 
@@ -23,6 +23,15 @@
   - `lcm_expand_query`：先搜摘要，再展开命中的原始事件。
   - `lcm_reindex`：增量刷新或完整重建索引。
   - `lcm_doctor`：检查 SQLite、重复节点、坏指针和缺失子节点。
+
+## 压缩模式
+
+压缩 provider 通过 `mode` 提供两种触发策略:
+
+- `mode: "rolling"`(0.2.0 起默认)——lossless-claw 式的稳态维护。每个 agent step 保留最近 `tailCount` 个表面节点逐字不动,更早的头部一旦超过 `foldBatchTokens` 就折叠进运行摘要。活跃表面始终贴近预算,不再等到一次性阈值才触发;反复折叠会把摘要标记串成多级召回 DAG(`lcm_describe` 会报告节点 `level`)。
+- `mode: "threshold"`——官方 `BasicCompactionEngine` 的一次性行为:用量超过路由模型窗口的 `thresholdRatio` 时触发,保留 `retainRatio`/`retainTokens` 逐字不动。
+
+两种模式都保留官方的上下文溢出恢复(供应商报窗口超限时先压缩再重试请求),并复用官方事务化 `compactRegion`(含压缩锁、回放校验和工具配对平衡保护)。
 
 ## 与 gbrain 的边界
 

@@ -4,7 +4,7 @@ A DSH-native lossless-recall context layer inspired by Lossless Claw / Lossless 
 
 It keeps **DeepSeek Harness's append-only session log as the only raw-history source of truth**. Compaction summaries receive stable recall node identifiers; a derived SQLite index records the summary DAG and exact source event sequence numbers. The model can later search, inspect, and expand old context without pretending that a summary is the original text.
 
-> Status: `0.1.0-alpha.1`. This is a functional minimum port of the lossless-recall architecture, not feature parity with the complete Lossless Claw project. Deferred/background compaction, focus briefs, cross-session rollups, embeddings, and a production DSH desktop integration test are still future work.
+> Status: `0.2.0-alpha.1`. Rolling steady-state compaction (lossless-claw style) is implemented; deferred/background compaction, focus briefs, cross-session rollups, embeddings, and a production DSH desktop integration test are still future work.
 
 中文说明：[README.zh-CN.md](./README.zh-CN.md)
 
@@ -24,6 +24,27 @@ It keeps **DeepSeek Harness's append-only session log as the only raw-history so
   - `lcm_expand_query`
   - `lcm_reindex`
   - `lcm_doctor`
+
+## Compaction modes
+
+The compaction provider supports two trigger policies via `mode`:
+
+- `mode: "rolling"` (default since 0.2.0) — lossless-claw style steady-state
+  maintenance. Every agent step keeps a fresh verbatim tail of `tailCount`
+  surface nodes and folds the older head into the running summary once it
+  exceeds `foldBatchTokens`. The active surface stays near its budget at all
+  times instead of growing until a one-shot threshold fires, and repeated
+  folds chain summary markers into the multi-level recall DAG (`lcm_describe`
+  reports each node's computed `level`).
+- `mode: "threshold"` — the official one-shot behavior of
+  `BasicCompactionEngine`: compaction fires when measured tokens cross
+  `thresholdRatio` of the routed model's context window, keeping
+  `retainRatio`/`retainTokens` verbatim.
+
+Both modes preserve the official context-overflow recovery (fold on provider
+context-window errors, then retry the request) and reuse the official
+transactional `compactRegion`, including its compaction locks, replay
+validation, and tool-pairing balance guard.
 
 ## Non-goals and boundaries
 
