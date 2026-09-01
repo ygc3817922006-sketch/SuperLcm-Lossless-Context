@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import z from '@deepseek-ai/schemastery'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 import { CONTEXT_WINDOW_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import { toolPairingBalancedBefore } from '@deepseek-ai/dsh-compaction'
@@ -22,6 +23,16 @@ function normalizeRolling(config) {
     foldTiming: raw.foldTiming === 'sync' ? 'sync' : ROLLING_DEFAULTS.foldTiming,
   }
 }
+
+const SETTINGS_NAMESPACE = 'lossless-context'
+
+const SETTINGS_SCHEMA = z.object({
+  tailCount: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.tailCount),
+  foldBatchTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.foldBatchTokens),
+  foldTiming: z.union([z.const('background'), z.const('sync')]).default(ROLLING_DEFAULTS.foldTiming),
+  thresholdRatio: z.percent().default(0.6),
+  retainRatio: z.percent().default(0.16),
+})
 
 function splitConfig(config) {
   const base = {}
@@ -76,6 +87,61 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
         reportIndexFailure(error)
       }
     })
+
+    this.installSettingsSection(ctx, base)
+  }
+
+  /**
+   * Expose the rolling tunables on the settings page. The composition entry
+   * stays authoritative while no settings provider (or user layer) exists;
+   * once one is mounted, its resolved value is applied live on every change.
+   * `mode` is deliberately cordis-only: switching it requires re-registering
+   * the pressure hooks, so it only applies on plugin load.
+   */
+  installSettingsSection(ctx, base) {
+    const entry = {
+      tailCount: this.rollingConfig.tailCount,
+      foldBatchTokens: this.rollingConfig.foldBatchTokens,
+      foldTiming: this.rollingConfig.foldTiming,
+      thresholdRatio: base.thresholdRatio,
+      retainRatio: base.retainRatio,
+    }
+    let source = () => entry
+    try {
+      ctx.inject(['settings'], (settingsCtx) => {
+        settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, SETTINGS_SCHEMA, entry, {
+          validate: (value) => {
+            if (value.retainRatio >= value.thresholdRatio) {
+              throw new Error(`retainRatio (${value.retainRatio}) must be less than thresholdRatio (${value.thresholdRatio})`)
+            }
+          },
+          setSource: (current) => {
+            source = current
+          },
+          onChange: () => {
+            const value = source()
+            this.rollingConfig = normalizeRolling({
+              ...this.rollingConfig,
+              tailCount: value.tailCount,
+              foldBatchTokens: value.foldBatchTokens,
+              foldTiming: value.foldTiming,
+            })
+            const thresholdRatio = value.thresholdRatio
+            const retainRatio = value.retainRatio
+            if (retainRatio >= thresholdRatio) return
+            // this.config is frozen; spread-replace so the base engine's live
+            // reads (resolveTargetPolicy) observe the new ratios. Drop a
+            // token-based retention form so the ratio takes effect.
+            const nextConfig = { ...this.config, thresholdRatio, retainRatio }
+            delete nextConfig.retainTokens
+            this.config = nextConfig
+          },
+        })
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      ctx.logger?.warn?.(`[dsh-lossless-context] settings section unavailable: ${message}`)
+    }
   }
 
   async summarize(...args) {

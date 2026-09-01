@@ -36,6 +36,27 @@ export default BasicCompactionEngine
 await stubPackage('dsh-llm', `
 export const CONTEXT_WINDOW_EXCEEDED_CODE = 'CONTEXT_WINDOW_EXCEEDED'
 `)
+await stubPackage('schemastery', `
+// Minimal stand-in for the settings-schema builder surface the engine uses:
+// tests never invoke installSection, so a chainable recorder is enough.
+function node() {
+  const self = {
+    _default: undefined,
+    default(value) { self._default = value; return self },
+    min() { return self },
+    max() { return self },
+    step() { return self },
+  }
+  return self
+}
+export default {
+  object(dict) { const n = node(); n._dict = dict; return n },
+  number() { return node() },
+  percent() { return node() },
+  union(list) { const n = node(); n._list = list; return n },
+  const(value) { const n = node(); n._value = value; return n },
+}
+`)
 await stubPackage('dsh-compaction', `
 export function toolPairingBalancedBefore() { return true }
 export function toolPairingBalancedAfter() { return true }

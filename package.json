@@ -1,6 +1,6 @@
 {
   "name": "dsh-lossless-context",
-  "version": "0.2.0-alpha.3",
+  "version": "0.2.0-alpha.4",
   "description": "Lossless-recall hierarchical context compaction for DeepSeek Harness, backed by the durable DSH session log.",
   "type": "module",
   "main": "./src/engine.js",
@@ -9,9 +9,11 @@
     "./tool": "./src/tool.js",
     "./core": "./src/core.js",
     "./marker": "./src/marker.js",
-    "./store": "./src/store.js"
+    "./store": "./src/store.js",
+    "./client": "./lib/client.js"
   },
   "files": [
+    "lib/",
     "src/",
     "docs/",
     "examples/",
@@ -25,6 +27,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
+      ]
     }
   },
   "scripts": {
@@ -55,13 +65,21 @@
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-compaction-basic": "*",
-    "@deepseek-ai/dsh-tools": "*"
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*",
+    "react": "*"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-compaction-basic": {
       "optional": true
     },
     "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    },
+    "react": {
       "optional": true
     }
   }

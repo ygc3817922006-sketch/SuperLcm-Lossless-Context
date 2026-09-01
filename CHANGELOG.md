@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0-alpha.4 — 2026-09-01
+
+- Web settings page: the plugin now appears as a card under Plugin
+  configuration (Plugin configuration) with the rolling-compaction
+  tunables — tail message count, fold batch tokens, fold timing, compaction
+  threshold and retention ratio — editable with Save/Discard staging.
+  Host side, the engine registers a `lossless-context` settings section via
+  `settings.installSection`; changes apply live to `rollingConfig`, and the
+  threshold/retention ratios are spread-replaced onto the frozen base config
+  (a token-based retention form is dropped so the ratio takes effect). A
+  validate hook rejects `retainRatio >= thresholdRatio` both on the host and
+  in the card.
+- `mode` is intentionally not exposed on the card: switching it requires
+  re-registering the pressure hooks, so it stays host-config-only and applies
+  on plugin reload.
+- New `./client` browser bundle (plain React.createElement, no build tooling)
+  with `dsh.client` web-platform metadata; runtime injects are the locale and
+  settings-scope services only — UI primitives are not imported so the
+  client-plugin purity gate holds.
+
 ## 0.2.0-alpha.3 — 2026-09-01
 
 - New rolling option `foldTiming: "background"` (default): lossless-claw style
