@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'dsh-lossless-context')
-  assert.equal(pkg.version, '0.2.0-alpha.7')
+  assert.equal(pkg.version, '0.2.0-alpha.8')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -25,16 +25,18 @@ test('package exports the backend and all stable library leaves', async () => {
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(pkg.dsh.client.platform, 'web')
   assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-settings-plugins'))
+  assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-api-remotes'))
+  assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-api-session-controller'))
   assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-compaction'], '*')
   assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-llm'], '*')
 })
 
-test('web settings expose an atomic free summarizer route and current cache-aware defaults', async () => {
+test('web settings expose an atomic catalog-backed summarizer route and current cache-aware defaults', async () => {
   const client = await text('lib/client.js')
   assert.match(client, /summarizationRoute/)
-  assert.match(client, /summarizationProvider/)
-  assert.match(client, /summarizationModel/)
-  assert.match(client, /scope\.set\("summarizationRoute", desiredRoute\)/)
+  assert.match(client, /remote\.session\.modelCatalog\(\)/)
+  assert.match(client, /const inject = \[[^\]]*"remote\.session"[^\]]*\]/)
+  assert.match(client, /scope\.set\("summarizationRoute", desired\)/)
   assert.doesNotMatch(client, /scope\.set\("summarizationProvider"/)
   assert.doesNotMatch(client, /scope\.set\("summarizationModel"/)
   assert.match(client, /foldBatchTokens:\s*64000/)

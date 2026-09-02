@@ -1,6 +1,6 @@
 {
   "name": "dsh-lossless-context",
-  "version": "0.2.0-alpha.7",
+  "version": "0.2.0-alpha.8",
   "description": "Lossless-recall hierarchical context compaction for DeepSeek Harness, backed by the durable DSH session log.",
   "type": "module",
   "main": "./src/engine.js",
@@ -33,7 +33,9 @@
       "inject": [
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-settings-plugins"
+        "@deepseek-ai/dsh-client-ui-settings-plugins",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-session-controller"
       ]
     }
   },

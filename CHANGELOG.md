@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0-alpha.8 — 2026-09-02
+
+- The WebUI plugin card now offers the summarizer route as one dropdown fed by
+  the Host model catalog (`remote.session.modelCatalog`, the same directory the
+  main model picker reads), grouped by provider with a “follow the main Agent”
+  entry that shows the current default. Choosing an entry saves the route
+  atomically; unknown routes render as “custom”, and a manual provider/model
+  form remains as a fallback when the catalog is unavailable.
+- Rolling and cache-policy fields moved under a collapsed “advanced” section,
+  regrouped into context limits / compaction rhythm / fallback compaction, with
+  plain-language labels and shorter hints in both locales.
+- `dsh.client.inject` now lists `@deepseek-ai/dsh-api-remotes` and
+  `@deepseek-ai/dsh-api-session-controller`; the client entry injects
+  `remote` and `remote.session`. Engine and settings keys are unchanged.
+
 ## 0.2.0-alpha.7 — 2026-09-01
 
 - Expose DSH's native `summarizationProvider` / `summarizationModel` route through
