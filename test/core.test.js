@@ -43,6 +43,24 @@ async function fixture(run) {
   }
 }
 
+test('rc.2 snapshots restore indexing, search, exact recovery and doctor', async () => fixture(({ store, session, events }) => {
+  const modern = { id: session.id, snapshotEvents() { return events }, get events() { throw new Error('legacy API used') } }
+  assert.equal(reindexSession(store, modern).indexed, 2)
+  assert.equal(searchSessionEvents(modern, 'diagnose H800')[0].seq, 0)
+  const page = expandNode(store, modern, { nodeId: 'child-12345678' })
+  assert.equal(page.chunks[0].content, JSON.stringify(events[0]))
+  assert.equal(doctorSession(store, modern).ok, true)
+}))
+
+test('unsupported session API cannot erase an index or report healthy', async () => fixture(({ store, session }) => {
+  reindexSession(store, session)
+  const unreadable = { id: session.id }
+  assert.throws(() => reindexSession(store, unreadable, { rebuild: true }), /unsupported session API/)
+  assert.equal(store.stats(session.id).nodeCount, 2)
+  assert.throws(() => doctorSession(store, unreadable), /unsupported session API/)
+  assert.equal(doctorSession(store, { id: session.id, snapshotEvents: () => [] }).ok, false)
+}))
+
 test('compaction event becomes a node with exact cited event seqs', async () => fixture(({ session, events }) => {
   const node = nodeFromCompactionEvent(session, events[2])
   assert.equal(node.nodeId, 'child-12345678')
@@ -136,7 +154,7 @@ test('doctor reports a healthy rebuildable index and detects stale derived rows'
   })
   const stale = doctorSession(store, session)
   assert.deepEqual(stale.staleInDb, ['stale-12345678'])
-  assert.equal(stale.ok, true, 'stale derived rows are repairable and do not invalidate the canonical log')
+  assert.equal(stale.ok, false, 'an index/log mismatch must not be reported as healthy')
 }))
 
 test('forked sessions may carry the same node id without overwriting each other', async () => fixture(({ store, session }) => {

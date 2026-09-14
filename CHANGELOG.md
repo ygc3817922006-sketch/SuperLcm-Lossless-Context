@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0-alpha.9 — 2026-09-14
+
+- Read DSH rc.2 session events through `snapshotEvents()`, retaining the legacy array API for older hosts. Indexing, raw-event search, exact expansion and diagnostics use the same reader.
+- Reject unsupported session APIs before rebuilding an index; never silently treat unavailable logs as empty. Doctor reports stale index entries as unhealthy without deleting them.
+- Verified against this deployment's real v3 session using the installed rc.2 Session implementation: all 182 cited original events recovered exactly across eight pages. Original session and production SQLite index were not changed by this isolated verification. New automatic compaction is not covered by that replay.
+
 ## 0.2.0-alpha.8 — 2026-09-02
 
 - The WebUI plugin card now offers the summarizer route as one dropdown fed by

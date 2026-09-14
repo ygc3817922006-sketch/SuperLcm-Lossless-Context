@@ -1,6 +1,6 @@
 {
   "name": "dsh-lossless-context",
-  "version": "0.2.0-alpha.8",
+  "version": "0.2.0-alpha.9",
   "description": "Lossless-recall hierarchical context compaction for DeepSeek Harness, backed by the durable DSH session log.",
   "type": "module",
   "main": "./src/engine.js",

@@ -11,9 +11,18 @@ function sessionIdOf(session) {
   return id
 }
 
-function eventMapOf(session) {
+function sessionEvents(session) {
+  // rc.2 exposes immutable snapshots; older hosts expose an events array.
+  const events = typeof session?.snapshotEvents === 'function'
+    ? session.snapshotEvents()
+    : session?.events
+  if (!Array.isArray(events)) throw new Error('LCM cannot read session events: unsupported session API')
+  return events
+}
+
+function eventMapOf(events) {
   const map = new Map()
-  for (const event of session?.events ?? []) {
+  for (const event of events) {
     if (Number.isSafeInteger(event?.seq)) map.set(event.seq, event)
   }
   return map
@@ -71,11 +80,12 @@ export function indexCompactionEvent(store, session, event) {
 
 export function reindexSession(store, session, { rebuild = false } = {}) {
   const sessionId = sessionIdOf(session)
+  const events = sessionEvents(session)
   if (rebuild) store.deleteSession(sessionId)
   let markers = 0
   let indexed = 0
   const errors = []
-  for (const event of session.events ?? []) {
+  for (const event of events) {
     if (event?.type !== 'compaction/summary') continue
     const marker = markerFromSummary(event.data?.summary)
     if (marker === null) continue
@@ -95,7 +105,7 @@ export function searchSessionEvents(session, query, { limit = 20 } = {}) {
   if (needle.length === 0) return []
   const capped = clampInteger(limit, 20, 1, 200)
   const hits = []
-  for (const event of session.events ?? []) {
+  for (const event of sessionEvents(session)) {
     const text = eventText(event)
     const normalized = text.normalize('NFKC').toLocaleLowerCase()
     if (!normalized.includes(needle)) continue
@@ -198,8 +208,8 @@ export function expandNode(store, session, {
   const charOffset = clampInteger(eventCharOffset, 0, 0, Number.MAX_SAFE_INTEGER)
   const budget = clampInteger(maxChars, 30000, 1000, 100000)
   const depth = clampInteger(recursiveDepth, 0, 0, 8)
-  const events = session.events ?? []
-  const eventsBySeq = new Map(events.map(event => [event?.seq, event]))
+  const events = sessionEvents(session)
+  const eventsBySeq = eventMapOf(events)
   const chunks = []
   let used = 0
   let next = null
@@ -274,12 +284,11 @@ export function searchLosslessContext(store, session, query, { scope = 'both', l
 
 export function doctorSession(store, session) {
   const sessionId = sessionIdOf(session)
-  const eventsBySeq = eventMapOf(session)
   const markers = []
   const markerIds = new Set()
   const duplicates = []
   const invalidSources = []
-  const events = session.events ?? []
+  const events = sessionEvents(session)
   const eventSeqs = new Set(events.map(event => event?.seq).filter(Number.isSafeInteger))
   for (const event of events) {
     if (event?.type !== 'compaction/summary') continue
@@ -305,6 +314,7 @@ export function doctorSession(store, session) {
       && duplicates.length === 0
       && invalidSources.length === 0
       && missingInDb.length === 0
+      && staleInDb.length === 0
       && stats.missingChildren.length === 0,
     sessionId,
     databasePath: store.path,
