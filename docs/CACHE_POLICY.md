@@ -1,9 +1,8 @@
-# 缓存感知的持久上下文策略 / Cache-aware persistent context policy
+# 全面异步持久上下文策略 / Fully asynchronous persistent context policy
 
-本文定义 SuperLcm 使用的 rolling 策略。
-This document defines the rolling policy used by `SuperLcm` for a long-lived coding worker. The goal is not to minimize prompt size at any cost. It is to keep the model-visible context small enough to remain useful while avoiding unnecessary destruction of a warm provider prefix cache.
+本文定义 SuperLcm 的 rolling 策略。目标是在不阻塞当前 Agent 的前提下，让长生命周期会话维持可用上下文，并保留可精确召回的原始事件。
 
-## Starting profile for GPT-5.6 Sol
+## GPT-5.6 Sol 起始配置
 
 ```yaml
 mode: rolling
@@ -13,60 +12,47 @@ pressureFoldTokens: 20000
 foldBatchTokens: 64000
 softActiveTokens: 160000
 hardActiveTokens: 220000
-cacheTtlSeconds: 1800
 foldTiming: background
+summarizationProvider: openai-codex
+summarizationModel: gpt-5.6-luna
 ```
 
-These are starting values, not universal constants. They are intentionally tuned for a large-context persistent worker; smaller-context models should use proportionally smaller pressure limits.
+这些是长上下文 Worker 的起始值，不是通用常量。较小上下文模型应按比例降低门槛。
 
-## What each number means
+自动压缩必须显式配置独立 provider/model。缺少其中任何一项时，SuperLcm 会记录警告并拒绝启动压缩，不会回退到当前 Agent 或 custom-subagent 路由。
 
-`tailCount=24` keeps at least the newest 24 surface nodes verbatim during normal rolling maintenance. `minRetainTokens=32000` is an independent token floor, so 24 tiny messages cannot leave the model with an impoverished recent working set.
+## 选区规则
 
-`foldBatchTokens=64000` is the normal surface-mutation granularity. A cache-hot request below the soft pressure boundary does not rewrite the active prefix merely because 20k of history became foldable.
+- `tailCount=24`：正常滚动时至少原样保留最近 24 个 surface node。
+- `minRetainTokens=32000`：独立的近期 token 下限，避免大量短消息留下过小工作集。
+- `foldBatchTokens=64000`：旧原文达到该规模即可后台准备摘要；摘要保持 ready，不立即改 active prefix。
+- `pressureFoldTokens=20000`：活动上下文达到 160k soft cap 后允许的最小有效缩减。
+- `hardActiveTokens=220000`：达到 hard cap 后接纳任何配对完整的非空缩减。此时节点数偏好可放宽到一个近期节点，但 32k token 下限与工具调用配对边界不放宽。
 
-`pressureFoldTokens=20000` is the minimum useful reduction admitted once the active context reaches `softActiveTokens=160000`. At that point context quality/size takes priority over preserving a hot prefix.
+每次 pre-step 按以下优先级选择一个安全 head：
 
-`hardActiveTokens=220000` is a safety boundary. Above it, any balanced non-empty reduction is admitted. Only at this hard boundary may the 24-node preference relax to one recent node; the 32k recent-token floor and tool-pairing boundary remain mandatory.
+1. `hard-cap`：活动 token 达到 hard cap；
+2. `soft-cap`：达到 soft cap，且 head 至少有 `pressureFoldTokens`；
+3. `background-batch`：head 至少有 `foldBatchTokens`，允许立即后台准备；
+4. 否则不启动。
 
-`cacheTtlSeconds=1800` is a heuristic, not provider telemetry. The engine records the previous agent pre-step time. A first observed step is treated as hot. A later step after a gap greater than the TTL is a cold-cache opportunity. Set the value to zero to disable this deferral.
+三个原因只影响选区准入，执行方式完全相同：全部后台、全部非阻塞、每个 Agent 同时最多一个 Worker。
 
-## Admission order
+## 后台事务
 
-For each pre-step the engine measures the canonical DSH request surface, derives a safe balanced head range, then applies this priority:
+1. **Stage**：同步读取当前 surface、消息、token-meter 节点和工具配对边界，生成稳定快照。该步骤不调用模型。
+2. **Summarize**：后台使用插件配置的专用路由生成摘要。任务拥有独立 `AbortController`，当前 turn 的取消不会取消它。
+3. **Commit**：常规 ready 批次等到 soft/hard pressure 才提交，overflow 可强制提交；不再猜测 provider 的缓存过期时间。只有原选区序列、对应 token 节点、replace generation 与工具配对仍一致时才提交；尾部新增消息不影响提交。
+4. **Restage**：选区已变时丢弃摘要，不写任何压缩事件，稍后重新选区。
 
-1. `hard-cap`: active tokens are at or above the hard boundary. Commit synchronously.
-2. `soft-cap`: active tokens are at or above the soft boundary and the foldable head is at least `pressureFoldTokens`. Commit synchronously.
-3. `cold-batch`: cache is considered cold and the foldable head is at least `foldBatchTokens`. With `foldTiming: background`, this may run concurrently with the next request.
-4. Otherwise leave the surface unchanged.
+成功提交连续写入 `compaction/start`、`compaction/summary`、带 surface replace 的 `user/message`、`compaction/end`。原始事件不会删除，summary 继续携带精确 source seq 与 SuperLcm DAG marker。
 
-Pressure folds are deliberately synchronous even when background mode is selected. DSH's official automatic `compactRegion()` transaction validates whole-surface stability; a pressure limit must not depend on whether an asynchronous summary wins a race with the next assistant/tool append.
+## 溢出行为
 
-A `cold-batch` background fold is opportunistic. If the surface changes while its summary is being prepared, DSH rejects the commit. The raw session remains canonical and the policy simply retries on a later step.
+Context overflow handler 只提交已经完成的后台摘要；若摘要仍在生成，它会保留原始 overflow 错误并立即返回，不会等待模型。正常情况下 64k 批次会在 soft/hard cap 之前提前启动，从而避免走到这个兜底。
 
-## 20k leaf summaries versus 64k surface commits
+## Cache 与 PTC
 
-The desired long-term architecture separates two concepts:
+缓存策略不再依赖 TTL 猜测。第一次提交后，system message 与已提交 checkpoint 组成冻结前缀；后续摘要只替换冻结前缀之后的原文，因此每次变化点持续向后移动。常规摘要在后台提前准备，到 soft/hard pressure 才进入 surface；只有 hard pressure 且冻结前缀本身妨碍缩减时，才允许合并旧 checkpoint 并付出一次前缀失效。
 
-- roughly 20k tokens as a leaf-summary granularity;
-- roughly 64k tokens as the granularity at which the active model surface is actually rewritten.
-
-The current alpha implements the second part safely but does **not** manufacture detached 20k leaf summaries. DSH's official transaction currently couples summarization to `compactRegion()`: a summary becomes authoritative only when the selected span is transactionally replaced on the surface. Creating hidden leaf summaries outside that transaction would introduce a second authority path and weaken the lossless contract.
-
-A future leaf-preparation layer should therefore have an explicit non-authoritative staging contract, then atomically promote prepared leaves only through a normal DSH compaction transaction. Until that contract exists, `pressureFoldTokens=20000` means “minimum useful pressure reduction”, not “background leaf size”.
-
-## Interaction with PTC / Code Mode
-
-Programmatic Tool Calling (PTC) is complementary to this policy. PTC should filter, aggregate, and parallelize mechanical tool work before returning to the model. Large grep output, file scans, test logs, and intermediate tool results should remain inside the code-mode runtime whenever possible, with only the useful conclusion returned to the active conversation.
-
-That reduces context generation at the source. SuperLcm then preserves the genuinely useful history and exact recall path instead of spending most of its budget summarizing disposable tool noise.
-
-Recall tools should follow the same principle: search narrowly first, expand bounded pages, and when PTC is available filter expanded material inside the program before returning it to the model.
-
-## What cache-aware means here
-
-This implementation is deliberately conservative. It does not claim to know whether OpenAI or another provider actually retained a cache entry. It only avoids frequent prefix mutations when recent step timing makes a warm cache plausible.
-
-Provider-reported cache telemetry can be added later, but it must remain an optimization signal. Active-context pressure and correctness are hard constraints and always override cache preservation.
-
-Useful future metrics include active tokens, foldable tokens, retained-tail tokens, admission reason, surface mutations per hour, summarizer latency, provider cached-input tokens, and cache-write tokens. Those metrics should be collected before further tuning the default thresholds.
+Programmatic Tool Calling (PTC) 仍应在源头过滤、聚合机械工具输出。SuperLcm 保存真正有用的历史和精确召回路径，而不是反复总结可丢弃的扫描噪声。

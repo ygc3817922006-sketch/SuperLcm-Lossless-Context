@@ -62,22 +62,22 @@ async function withSettingsEngine(run) {
   }
 }
 
-test('summarizer route defaults to follow-agent and requires an atomic complete pair', async () => withSettingsEngine(async ({ installed, getSource }) => {
+test('summarizer route requires an explicit atomic provider-model pair', async () => withSettingsEngine(async ({ installed, getSource }) => {
   assert.equal(installed.namespace, 'superlcm')
   assert.deepEqual(installed.entry.summarizationRoute, { provider: '', model: '' })
 
   assert.throws(() => installed.options.validate({
     ...getSource(),
     summarizationRoute: { provider: 'openai', model: '' },
-  }), /must both be set or both be empty/)
+  }), /requires an explicit summarization provider and model/)
 
-  assert.doesNotThrow(() => installed.options.validate({
+  assert.throws(() => installed.options.validate({
     ...getSource(),
     summarizationRoute: { provider: '', model: '' },
-  }))
+  }), /requires an explicit summarization provider and model/)
 }))
 
-test('atomic summarizer route applies live and blank route restores follow-agent behavior', async () => withSettingsEngine(async ({ engine, installed, getSource, setSource }) => {
+test('atomic dedicated summarizer route applies live and blank changes are ignored', async () => withSettingsEngine(async ({ engine, installed, getSource, setSource }) => {
   const dedicated = {
     ...getSource(),
     summarizationRoute: { provider: '  openai  ', model: '  gpt-5.6-sol  ' },
@@ -104,10 +104,10 @@ test('atomic summarizer route applies live and blank route restores follow-agent
     ...getSource(),
     summarizationRoute: { provider: '', model: '' },
   }
-  installed.options.validate(followAgent)
+  assert.throws(() => installed.options.validate(followAgent), /requires an explicit summarization provider and model/)
   setSource(followAgent)
   installed.options.onChange()
 
-  assert.equal(engine.config.summarizationProvider, '')
-  assert.equal(engine.config.summarizationModel, '')
+  assert.equal(engine.config.summarizationProvider, 'anthropic')
+  assert.equal(engine.config.summarizationModel, 'claude-opus-5')
 }))

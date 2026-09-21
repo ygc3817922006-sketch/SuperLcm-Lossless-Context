@@ -33,6 +33,8 @@ export default BasicCompactionEngine
 `)
 await stubPackage('dsh-llm', `
 export const CONTEXT_WINDOW_EXCEEDED_CODE = 'CONTEXT_WINDOW_EXCEEDED'
+export function createUserMessage(data) { return data }
+export function errorChain(error) { return [{ message: error instanceof Error ? error.message : String(error) }] }
 `)
 await stubPackage('schemastery', `
 function node() {
@@ -57,7 +59,8 @@ export default {
 await stubPackage('dsh-compaction', `
 export function toolPairingBalancedBefore() { return true }
 export function toolPairingBalancedAfter() { return true }
-export function compactCheckpointSource() { return null }
+export function compactCheckpointSource(compactionId) { return { kind: 'plugin', plugin: 'compact', compactionId } }
+export function isCompactCheckpointSource(source) { return source?.kind === 'plugin' && source?.plugin === 'compact' }
 export const ManualCompactionError = class ManualCompactionError extends Error {}
 export const CompactionId = (value) => value
 `)

@@ -30,7 +30,6 @@
         foldBatchTokens: 64000
         softActiveTokens: 160000
         hardActiveTokens: 220000
-        cacheTtlSeconds: 1800
         foldTiming: background
         # 紧急/提供方溢出策略继承 DSH 基础压缩。
         # Emergency / provider-overflow policy inherited from DSH basic compaction.

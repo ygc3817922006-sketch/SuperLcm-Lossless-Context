@@ -1,11 +1,10 @@
 /**
  * 滚动模式的表面选区策略 / Rolling-mode surface selection for SuperLcm compaction.
  *
- * 缓存感知策略同时按表面节点数和 Token 预算保留最新原文尾部。
- * The cache-aware policy keeps a fresh verbatim tail by both surface-node
- * count and token budget. Routine mutations wait for a larger cold-cache
- * commit batch; active-context pressure can override that delay with a smaller
- * useful fold, and the hard cap always wins.
+ * 前缀稳定策略同时按表面节点数和 Token 预算保留最新原文尾部。
+ * The prefix-stable policy keeps a fresh verbatim tail by both surface-node
+ * count and token budget. Routine batches may be prepared early, while the engine
+ * controls when they enter the active surface and which leading checkpoints freeze.
  */
 
 function positiveInteger(value, fallback) {
@@ -65,7 +64,6 @@ export function selectRollingRange(pricedNodes, surfaceSeqs, options = {}) {
     softActiveTokens + 1,
   )
   const activeTokens = nonNegativeInteger(options.activeTokens, totalTokenCount(pricedNodes))
-  const cacheHot = options.cacheHot === true
   const hardPressure = activeTokens >= hardActiveTokens
   const firstFoldableIndex = Math.min(
     nonNegativeInteger(options.firstFoldableIndex, 0),
@@ -103,8 +101,8 @@ export function selectRollingRange(pricedNodes, surfaceSeqs, options = {}) {
     reason = 'hard-cap'
   } else if (activeTokens >= softActiveTokens && foldTokens >= pressureFoldTokens) {
     reason = 'soft-cap'
-  } else if (!cacheHot && foldTokens >= foldBatchTokens) {
-    reason = 'cold-batch'
+  } else if (foldTokens >= foldBatchTokens) {
+    reason = 'background-batch'
   } else {
     return null
   }
@@ -117,7 +115,6 @@ export function selectRollingRange(pricedNodes, surfaceSeqs, options = {}) {
     tailTokens: boundary.keptTokens,
     tailCountRelaxed,
     activeTokens,
-    cacheHot,
     reason,
   }
 }

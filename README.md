@@ -4,7 +4,7 @@ A DSH-native SuperLcm lossless-recall context layer inspired by Lossless Claw / 
 
 It keeps **DeepSeek Harness's append-only session log as the only raw-history source of truth**. Compaction summaries receive stable recall node identifiers; a derived SQLite index records the summary DAG and exact source event sequence numbers. The model can later search, inspect, and expand old context without pretending that a summary is the original text.
 
-> Status: `0.3.0-alpha.2`. Rolling compaction is cache-aware, and the summarization provider/model can now be selected independently and changed live from the WebUI plugin settings. Exact raw recall remains backed by the DSH event log.
+> Status: `0.3.0-alpha.6`. Rolling compaction preserves an immutable leading prefix, and the summarization provider/model can now be selected independently and changed live from the WebUI plugin settings. Exact raw recall remains backed by the DSH event log.
 
 中文说明：[README.zh-CN.md](./README.zh-CN.md)
 
@@ -30,22 +30,17 @@ Summarizer Provider: openai
 Summarizer Model:    gpt-5.6-sol
 ```
 
-Leave **both** fields empty to follow the current Agent route. A dedicated route must set both fields; half-configured provider/model pairs are rejected. Changes apply to subsequent compactions immediately without a plugin restart.
+Automatic compaction requires an explicit provider/model pair. Blank or half-configured routes are rejected, and background work never falls back to the active Agent or custom-subagent route. Changes apply to subsequent compactions immediately without a plugin restart.
 
-DSH's current browser model directory is session-scoped, so this plugin intentionally does not bind the current conversation's `ModelSelect` to a global compaction setting. The two free-form fields can later become provider/model dropdowns without changing the underlying settings contract once DSH exposes a global model catalog.
+## Fully asynchronous rolling compaction
 
-## Compaction modes
+SuperLcm supports one automatic policy: `mode: "rolling"` with `foldTiming: "background"`. Blocking `sync` timing and the old synchronous `threshold` mode are rejected.
 
-The compaction provider supports two trigger policies via `mode`:
+The default policy keeps the newest 24 surface nodes and at least 32k recent tokens verbatim. A safe 64k raw-history batch may be summarized immediately by the detached worker, but the ready result stays off-surface until the 160k soft cap, 220k hard cap, or overflow requires reduction. After commit, the leading system message and every earlier committed checkpoint are frozen as an exact byte-stable prefix; later batches compact only raw history after that prefix. Only hard pressure may merge frozen checkpoints. Preparation and commit remain non-blocking.
 
-- `mode: "rolling"` (default) — cache-aware persistent-worker maintenance. The default policy keeps the newest 24 surface nodes and at least 32k recent tokens verbatim. Routine prefix mutation waits for a 64k foldable head and a cold-cache opportunity; a 160k active-context soft cap admits a useful fold from 20k, and a 220k hard cap forces any safe reduction. Soft/hard folds are synchronous even when `foldTiming` is `background`.
-- `mode: "threshold"` — the official one-shot behavior of `BasicCompactionEngine`: compaction fires when measured tokens cross `thresholdRatio` of the routed model's context window, keeping `retainRatio`/`retainTokens` verbatim.
+The worker snapshots the selected surface, summarizes it through the plugin-configured route with its own abort controller, then commits only if the selected span and token-meter snapshot are still stable. Concurrent tail growth is allowed. A changed selected span is discarded and restaged later. Commit writes the normal durable `compaction/start`, `compaction/summary`, replacement `user/message`, and `compaction/end` transaction.
 
-The cache heuristic uses `cacheTtlSeconds` (default 1800). The first observed model step is treated conservatively as cache-hot; later inter-step gaps inside that TTL defer routine prefix mutation. Set it to `0` to disable cache deferral.
-
-Both modes preserve the official context-overflow recovery and reuse DSH's transactional `compactRegion`, including its compaction lock, replay validation, shrink check, and tool-pairing balance guard.
-
-The complete policy, GPT-5.6 Sol starting values, background-stability limitation, and the deliberate boundary around future 20k leaf summarization are documented in [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md).
+The complete policy and GPT-5.6 Sol starting values are documented in [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md).
 
 ## Non-goals and boundaries
 
@@ -153,7 +148,7 @@ npm run validate
 npm pack --dry-run
 ```
 
-Current automated coverage includes marker validation, DAG reconstruction, Unicode search fallback, session/fork isolation, SQLite transactions, exact source pointers, sparse event sequence ids, large-event pagination, tool registration, lifecycle disposal, failure containment, cache-aware rolling selection, pressure overrides, background-vs-synchronous admission, and live summarizer-route settings validation.
+Current automated coverage includes marker validation, DAG reconstruction, Unicode search fallback, session/fork isolation, SQLite transactions, exact source pointers, sparse event sequence ids, large-event pagination, tool registration, lifecycle disposal, failure containment, rolling selection, fully non-blocking pressure handling, independent cancellation, staged transaction stability, synchronous-mode rejection, and dedicated summarizer-route validation.
 
 ## Architecture
 

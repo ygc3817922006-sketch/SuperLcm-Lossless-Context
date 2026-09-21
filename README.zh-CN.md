@@ -4,7 +4,7 @@
 
 它把 **DSH 只追加的 Session Event Log（会话事件日志）作为唯一原文真源**。每次压缩摘要都会获得稳定的召回节点 ID；SQLite 只保存摘要 DAG（有向无环图）、父子关系和精确的源事件序号。模型以后可以搜索、描述和展开旧上下文，而不是把摘要冒充成原文。
 
-> 当前版本：`0.3.0-alpha.2`。rolling（滚动）压缩使用 cache-aware（缓存感知）策略；压缩摘要模型现在可以独立指定，并可在 WebUI 的插件设置页热更新。原始历史仍由 DSH Event Log 无损保留。
+> 当前版本：`0.3.0-alpha.6`。rolling（滚动）压缩会冻结前缀；压缩摘要模型现在可以独立指定，并可在 WebUI 的插件设置页热更新。原始历史仍由 DSH Event Log 无损保留。
 
 ## 已实现
 
@@ -27,22 +27,17 @@
 压缩 Model:    gpt-5.6-sol
 ```
 
-两项都留空时，压缩摘要跟随当前 Agent 的实际路由模型；要指定独立压缩模型时必须两项同时填写。字段接受任意当前 DSH adapter 可路由的真实 provider/model ID，插件不会写死模型名单。保存后对后续 compaction 立即生效，不需要重启插件。
+自动压缩必须明确配置 provider/model 两项。留空或只填一项都会被拒绝；后台任务绝不回退到当前 Agent 或 custom-subagent 的模型。保存后对后续压缩立即生效，无需重启插件。
 
-DSH 当前的 Web 模型目录是 session-scoped（按会话作用域）的，因此本插件没有把当前聊天会话的 ModelSelect 组件硬绑定到全局压缩配置。等 DSH 提供全局 model catalog 后，可在不改变底层配置合同的前提下把这两个自由文本框升级为联动下拉菜单。
+## 全面异步滚动压缩
 
-## 压缩模式
+SuperLcm 只支持一种自动策略：`mode: "rolling"`、`foldTiming: "background"`。阻塞式 `sync` 和旧的同步 `threshold` 模式都会被拒绝。
 
-压缩 provider（提供方）通过 `mode` 提供两种触发策略：
+默认至少原样保留最近 24 个 surface node（表面节点）和 32k token。安全的 64k 原文批次可立刻交给独立 Worker 后台生成摘要，但 ready 结果先不进入 surface，直到 160k soft-cap、220k hard-cap 或 overflow 要求缩减。提交后，最前面的 system message 和此前已经提交的 checkpoint 都冻结为逐字不变的前缀；以后只压它们后面的原文。只有 hard pressure 才允许低频合并冻结摘要。准备与提交都不阻塞当前回复。
 
-- `mode: "rolling"`（默认）——面向持久 Worker（工作子代理）的缓存感知维护。默认至少保留最近 24 个 surface node（表面节点）和 32k token 原文；普通前缀改写等待至少 64k 的旧 head，并尽量等缓存变冷。活动上下文达到 160k 后，只要能安全折叠至少 20k 就触发 soft-cap（软门）；达到 220k 后进入 hard-cap（硬门），任何安全且有意义的旧 head 都可以折叠。即使 `foldTiming=background`，soft/hard 压力折叠也会同步完成后才允许下一次模型请求。
-- `mode: "threshold"`——官方 `BasicCompactionEngine` 的一次性行为：用量超过路由模型窗口的 `thresholdRatio` 时触发，并按 `retainRatio`/`retainTokens` 保留近期原文。
+后台 Worker 先固定选区快照，使用插件配置的独立模型和独立 AbortController 生成摘要；完成后只在选区与 token-meter 快照仍稳定时提交。期间允许尾部继续增长；若选区被改写，则丢弃结果并稍后重新准备。提交仍写入标准持久事件：`compaction/start`、`compaction/summary`、替换用 `user/message`、`compaction/end`。
 
-缓存启发式由 `cacheTtlSeconds` 控制，默认 1800 秒。插件加载后第一次观察到的模型 step（步骤）保守视为缓存仍热；之后连续 step 的间隔小于该 TTL 时，普通 rolling 改写会延迟。设置为 `0` 可关闭缓存延迟。
-
-两种模式都保留 DSH 官方的 context-overflow recovery（上下文溢出恢复），并复用官方事务化 `compactRegion`，包括 compaction lock（压缩锁）、replay validation（回放校验）、shrink check（缩减检查）和工具调用配对保护。
-
-完整策略、GPT-5.6 Sol 推荐起始值、后台折叠的稳定性限制，以及为什么当前版本没有假装实现“20k leaf（叶摘要）+64k commit（表面提交）”，见 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
+完整策略与 GPT-5.6 Sol 推荐起始值见 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
 
 ## 与 gbrain 的边界
 
@@ -107,7 +102,6 @@ pressureFoldTokens: 20000
 foldBatchTokens: 64000
 softActiveTokens: 160000
 hardActiveTokens: 220000
-cacheTtlSeconds: 1800
 foldTiming: background
 ```
 
@@ -130,7 +124,7 @@ npm run validate
 npm pack --dry-run
 ```
 
-自动测试覆盖原有无损召回合同、缓存感知 rolling、soft/hard 压力覆盖、background/sync（后台/同步）触发语义，以及压缩模型设置的配对校验与热更新。当前测试仍不等于正式 DSH 桌面端全链路证书；alpha 版在正式 profile 启用前必须跑真实 Agent loop（代理循环）验收。
+自动测试覆盖无损召回合同、rolling 选区、soft/hard 非阻塞处理、独立取消信号、分阶段事务稳定性、同步模式拒绝，以及独立压缩模型设置校验与热更新。当前测试仍不等于正式 DSH 桌面端全链路证书；alpha 版在正式 profile 启用前必须跑真实 Agent loop（代理循环）验收。
 
 ## 架构
 

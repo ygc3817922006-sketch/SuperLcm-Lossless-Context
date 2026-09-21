@@ -51,27 +51,15 @@ test('construction survives the base hook firing during super() and defers rolli
   assert.equal(typeof listeners.get('agent/pre-step'), 'function')
 }))
 
-test('cache-aware defaults match the persistent Sol profile', async () => withEngine(async ({ engine }) => {
+test('rolling defaults match the persistent Sol profile', async () => withEngine(async ({ engine }) => {
   assert.equal(engine.rollingConfig.tailCount, 24)
   assert.equal(engine.rollingConfig.minRetainTokens, 32000)
   assert.equal(engine.rollingConfig.pressureFoldTokens, 20000)
   assert.equal(engine.rollingConfig.foldBatchTokens, 64000)
   assert.equal(engine.rollingConfig.softActiveTokens, 160000)
   assert.equal(engine.rollingConfig.hardActiveTokens, 220000)
-  assert.equal(engine.rollingConfig.cacheTtlSeconds, 1800)
   assert.equal(engine.rollingConfig.foldTiming, 'background')
 }))
-
-test('cache heuristic is conservative on first step and expires by TTL', async () => withEngine(async ({ engine }) => {
-  let now = 1000
-  engine.currentTimeMs = () => now
-  const agent = {}
-  assert.equal(engine.cacheHotFor(agent), true)
-  now += 9000
-  assert.equal(engine.cacheHotFor(agent), true)
-  now += 11000
-  assert.equal(engine.cacheHotFor(agent), false)
-}, { thresholdRatio: 0.8, cacheTtlSeconds: 10 }))
 
 test('planRolling uses full active-context tokens and the fresh token floor', async () => withEngine(async ({ engine }) => {
   const nodes = Array.from({ length: 30 }, (_, index) => ({ seq: index + 1, tokens: 6000 }))
@@ -98,71 +86,125 @@ test('planRolling protects a system message at surface node zero', async () => w
   assert.equal(selection.end, 16)
 }), { thresholdRatio: 0.8 })
 
-test('soft pressure is awaited even when background timing is enabled', async () => withEngine(async ({ engine, listeners }) => {
+test('planRolling freezes committed checkpoints and only folds raw history after them', async () => withEngine(async ({ engine }) => {
+  const frozen = appendRecallEnvelope([{ type: 'text', text: 'frozen summary' }], { id: 'frozen-12345678' })
+  const events = [
+    { seq: 0, type: 'system/message' },
+    { seq: 1, type: 'user/message', data: { source: { kind: 'plugin', plugin: 'compact', compactionId: 'fixture' }, content: frozen } },
+    ...Array.from({ length: 40 }, (_, index) => ({ seq: index + 2, type: 'user/message' })),
+  ]
+  const nodes = events.map(event => ({ seq: event.seq, tokens: 10000 }))
+  const session = {
+    surface: { nodes: nodes.map(node => node.seq) },
+    measurement: { nodes, totalTokens: 150000 },
+    eventAt(seq) { return events.find(event => event.seq === seq) },
+  }
+  const selection = engine.planRolling({ session })
+  assert.equal(selection.start, 2)
+  assert.ok(selection.end > selection.start)
+}), { thresholdRatio: 0.8 })
+
+test('hard pressure may merge frozen checkpoints only when no later range can shrink', async () => withEngine(async ({ engine }) => {
+  const summary = (id) => appendRecallEnvelope([{ type: 'text', text: id }], { id })
+  const events = [
+    { seq: 0, type: 'system/message' },
+    { seq: 1, type: 'user/message', data: { source: { kind: 'plugin', plugin: 'compact', compactionId: 'fixture' }, content: summary('frozen-12345678') } },
+    { seq: 2, type: 'user/message', data: { source: { kind: 'plugin', plugin: 'compact', compactionId: 'fixture' }, content: summary('frozen-23456789') } },
+    { seq: 3, type: 'user/message' },
+  ]
+  const nodes = events.map(event => ({ seq: event.seq, tokens: 50000 }))
+  const session = {
+    surface: { nodes: nodes.map(node => node.seq) },
+    measurement: { nodes, totalTokens: 240000 },
+    eventAt(seq) { return events.find(event => event.seq === seq) },
+  }
+  const selection = engine.planRolling({ session })
+  assert.equal(selection.reason, 'hard-cap')
+  assert.equal(selection.start, 1)
+  assert.equal(selection.end, 2)
+}), { thresholdRatio: 0.8 })
+
+test('soft pressure starts detached summarization without blocking the turn', async () => withEngine(async ({ engine, listeners }) => {
   await Promise.resolve()
   const preStep = listeners.get('agent/pre-step')
   const agent = {}
-  engine.cacheHotFor = () => true
-  engine.planRolling = () => ({ start: 1, end: 2, foldTokens: 20000, tailNodes: 24, tailTokens: 32000, activeTokens: 170000, cacheHot: true, reason: 'soft-cap', tailCountRelaxed: false })
+  const selection = { start: 1, end: 2, foldTokens: 20000, tailNodes: 24, tailTokens: 32000, activeTokens: 170000, reason: 'soft-cap', tailCountRelaxed: false }
+  let planned = false
+  engine.planRolling = () => planned ? null : (planned = true, selection)
+  engine.prepareBackgroundSelection = (_agent, value) => value
   let release
   const gate = new Promise(resolve => { release = resolve })
-  let committed = false
-  engine.commitRollingSelection = async () => { await gate; committed = true; return { shadowedSeqs: [1, 2], shadowedRange: { start: 1, end: 2 }, shadowedTokenCount: 42 } }
-  const pending = preStep({ agent, signal: { aborted: false } }, () => 'next')
-  assert.equal(await Promise.race([pending, Promise.resolve('blocked')]), 'blocked')
-  assert.equal(committed, false)
-  release()
-  assert.equal(await pending, 'next')
-  assert.equal(committed, true)
-}, { thresholdRatio: 0.8, foldTiming: 'background' }))
+  let detachedSignal
+  engine.summarizeBackgroundSelection = async (_agent, prepared, signal) => { detachedSignal = signal; await gate; return prepared }
+  engine.commitBackgroundSelection = (_agent, summarized) => ({ shadowedSeqs: [1, 2], shadowedRange: { start: 1, end: 2 }, shadowedTokenCount: 42, rollingPolicy: summarized })
 
-test('cold-batch background fold starts without blocking and serializes passes', async () => withEngine(async ({ engine, listeners }) => {
-  await Promise.resolve()
-  const preStep = listeners.get('agent/pre-step')
-  const agent = {}
-  engine.cacheHotFor = () => false
-  engine.planRolling = () => ({ start: 1, end: 5, foldTokens: 64000, tailNodes: 24, tailTokens: 32000, activeTokens: 120000, cacheHot: false, reason: 'cold-batch', tailCountRelaxed: false })
-  let calls = 0
-  let releaseFirst
-  const firstGate = new Promise(resolve => { releaseFirst = resolve })
-  engine.commitRollingSelection = async () => { calls += 1; if (calls === 1) await firstGate; return { shadowedSeqs: [1, 5], shadowedRange: { start: 1, end: 5 }, shadowedTokenCount: 42 } }
-  const first = preStep({ agent, signal: { aborted: false } }, () => 'next')
-  assert.equal(await first, 'next')
-  assert.equal(calls, 1)
-  const second = preStep({ agent, signal: { aborted: false } }, () => 'next')
-  await new Promise(resolve => setImmediate(resolve))
-  assert.equal(calls, 1)
-  releaseFirst()
-  assert.equal(await second, 'next')
-  assert.equal(calls, 2)
+  const turnController = new AbortController()
+  assert.equal(await preStep({ agent, signal: turnController.signal }, () => 'next'), 'next')
+  assert.ok(detachedSignal instanceof AbortSignal)
+  assert.notEqual(detachedSignal, turnController.signal)
+  turnController.abort()
+  assert.equal(detachedSignal.aborted, false)
+  assert.equal(engine.tryCommitBackgroundFold(agent), null)
+  release()
   await engine.settleBackgroundFold(agent)
-}, { thresholdRatio: 0.8, foldTiming: 'background' }))
+  assert.equal(await preStep({ agent, signal: new AbortController().signal }, () => 'next'), 'next')
+  assert.equal(engine.backgroundFolds.has(agent), false)
+}, { thresholdRatio: 0.8, summarizationProvider: 'test', summarizationModel: 'summary-model' }))
 
-test('background fold failures are contained and do not block the next step', async () => withEngine(async ({ engine, listeners }) => {
+test('routine summaries wait ready without mutating the prefix until pressure', async () => withEngine(async ({ engine }) => {
+  const agent = { session: { measurement: { totalTokens: 100000 } } }
+  let commits = 0
+  engine.commitBackgroundSelection = () => { commits += 1; return { shadowedSeqs: [1], shadowedRange: { start: 1, end: 1 }, shadowedTokenCount: 64000 } }
+  const readyState = () => ({ status: 'ready', selection: { reason: 'background-batch' }, summarized: {} })
+
+  engine.backgroundFolds.set(agent, readyState())
+  assert.equal(engine.tryCommitBackgroundFold(agent, { allowPressure: true }), null)
+  assert.equal(commits, 0)
+  assert.equal(engine.backgroundFolds.has(agent), true)
+
+  agent.session.measurement.totalTokens = 170000
+  assert.notEqual(engine.tryCommitBackgroundFold(agent, { allowPressure: true }), null)
+  assert.equal(commits, 1)
+}, { thresholdRatio: 0.8, summarizationProvider: 'test', summarizationModel: 'summary-model' }))
+
+test('all fold reasons serialize through one nonblocking background worker', async () => withEngine(async ({ engine, listeners }) => {
   await Promise.resolve()
   const preStep = listeners.get('agent/pre-step')
   const agent = {}
-  engine.cacheHotFor = () => false
-  engine.planRolling = () => ({ start: 1, end: 5, foldTokens: 64000, tailNodes: 24, tailTokens: 32000, activeTokens: 120000, cacheHot: false, reason: 'cold-batch', tailCountRelaxed: false })
-  engine.commitRollingSelection = async () => { throw new Error('fold exploded') }
-  assert.equal(await preStep({ agent, signal: { aborted: false } }, () => 'next'), 'next')
-  assert.equal(await preStep({ agent, signal: { aborted: false } }, () => 'next'), 'next')
-}))
-
-test('sync foldTiming also awaits a cold-batch fold', async () => withEngine(async ({ engine, listeners }) => {
-  await Promise.resolve()
-  const preStep = listeners.get('agent/pre-step')
-  const agent = {}
-  engine.cacheHotFor = () => false
-  engine.planRolling = () => ({ start: 1, end: 5, foldTokens: 64000, tailNodes: 24, tailTokens: 32000, activeTokens: 120000, cacheHot: false, reason: 'cold-batch', tailCountRelaxed: false })
+  let plans = 0
+  engine.planRolling = () => ({ start: 1, end: 5, foldTokens: 64000, tailNodes: 24, tailTokens: 32000, activeTokens: 230000, reason: plans++ === 0 ? 'hard-cap' : 'background-batch', tailCountRelaxed: false })
+  engine.prepareBackgroundSelection = (_agent, value) => value
+  let calls = 0
   let release
   const gate = new Promise(resolve => { release = resolve })
-  engine.commitRollingSelection = async () => { await gate; return { shadowedSeqs: [1, 5], shadowedRange: { start: 1, end: 5 }, shadowedTokenCount: 42 } }
-  const pending = preStep({ agent, signal: { aborted: false } }, () => 'next')
-  assert.equal(await Promise.race([pending, Promise.resolve('blocked')]), 'blocked')
+  engine.summarizeBackgroundSelection = async (_agent, prepared) => { calls += 1; await gate; return prepared }
+  engine.commitBackgroundSelection = () => ({ shadowedSeqs: [1, 5], shadowedRange: { start: 1, end: 5 }, shadowedTokenCount: 42 })
+
+  assert.equal(await preStep({ agent, signal: new AbortController().signal }, () => 'next'), 'next')
+  assert.equal(await preStep({ agent, signal: new AbortController().signal }, () => 'next'), 'next')
+  assert.equal(calls, 1)
   release()
-  assert.equal(await pending, 'next')
-}, { thresholdRatio: 0.8, foldTiming: 'sync' }))
+  await engine.settleBackgroundFold(agent)
+  assert.equal(calls, 1)
+}, { thresholdRatio: 0.8, summarizationProvider: 'test', summarizationModel: 'summary-model' }))
+
+test('background summary failures are contained and allow a later restage', async () => withEngine(async ({ engine, listeners }) => {
+  await Promise.resolve()
+  const preStep = listeners.get('agent/pre-step')
+  const agent = {}
+  engine.planRolling = () => ({ start: 1, end: 5, foldTokens: 64000, tailNodes: 24, tailTokens: 32000, activeTokens: 120000, reason: 'background-batch', tailCountRelaxed: false })
+  engine.prepareBackgroundSelection = (_agent, value) => value
+  let calls = 0
+  engine.summarizeBackgroundSelection = async () => { calls += 1; throw new Error('fold exploded') }
+  assert.equal(await preStep({ agent, signal: new AbortController().signal }, () => 'next'), 'next')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(await preStep({ agent, signal: new AbortController().signal }, () => 'next'), 'next')
+  assert.equal(calls, 2)
+}, { thresholdRatio: 0.8, summarizationProvider: 'test', summarizationModel: 'summary-model' }))
+
+test('synchronous automatic compaction mode is rejected', async () => {
+  await assert.rejects(() => withEngine(async () => {}, { thresholdRatio: 0.8, foldTiming: 'sync' }), /only supports non-blocking background/)
+})
 
 test('committed compaction events are indexed after the DSH transaction', async () => withEngine(async ({ engine, listeners }) => {
   const summary = appendRecallEnvelope([{ type: 'text', text: 'committed checkpoint' }], { id: 'node-12345678' })

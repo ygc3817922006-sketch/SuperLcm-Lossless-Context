@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0-alpha.6 — 2026-09-21
+
+- 缓存策略改为真正的前缀稳定：system 与已提交 checkpoint 连续冻结，后续只压其后的原文；常规摘要提前在后台准备，到上下文压力线才换入，不再猜缓存 TTL。
+- hard cap 且后段无法继续缩减时，才低频合并冻结 checkpoint；原文仍由事件日志与 DAG 精确召回。
+- Preserve an exact immutable system/checkpoint prefix, prepare raw-history summaries early, and mutate the surface only under context pressure; frozen checkpoints merge only as a hard-cap fallback.
+
+## 0.3.0-alpha.5 — 2026-09-21
+
+- 将缓存门从后台摘要启动阶段移到 active-prefix 提交阶段：cache-hot 时可以预生成摘要，但常规批次保持 ready，直到 cold-cache pre-step 才替换前缀；soft/hard/overflow 仍可越过延迟。
+- Move the cache gate from detached preparation to prefix mutation: prepare while hot, commit routine work only before a cold-cache request.
+
+## 0.3.0-alpha.4 — 2026-09-21
+
+- 恢复并明确缓存友好准入：最前面的 system message 永不进入压缩选区；cache-hot 时暂缓普通 64k 批次，soft/hard pressure 仍可越过缓存保护。
+- Restore and document cache-aware admission while retaining fully asynchronous execution.
+
+## 0.3.0-alpha.3 — 2026-09-21
+
+- 自动压缩改为全面非阻塞后台管线：固定选区、独立模型摘要、稳定性校验后原子提交；soft-cap、hard-cap 与常规批次均不再等待摘要。
+- Background compaction is now fully non-blocking: stage a stable range, summarize through an independent configured route, then atomically commit only if the range is still valid.
+- 拒绝 `foldTiming: sync`、`mode: threshold` 与空摘要路由，且不会回退到当前 Agent/custom-subagent 模型。
+
 ## 0.3.0-alpha.2 — 2026-09-21
 
 - 修复 WebUI 设置命名空间使用大写名称导致设置服务不可用的问题；显示名称仍为 `SuperLcm`，内部键改为 `superlcm`。
