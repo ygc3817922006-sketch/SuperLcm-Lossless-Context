@@ -7,4 +7,5 @@ node_modules/
 coverage/
 .tmp/
 :memory:
-*.tgz
+# Local release archives are ignored; the published filename is SuperLcm-*.tgz.
+# 本地发布压缩包忽略；发布文件名统一为 SuperLcm-*.tgz。

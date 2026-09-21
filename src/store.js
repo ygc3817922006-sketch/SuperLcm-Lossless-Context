@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -51,13 +51,17 @@ function ftsQuery(text) {
 }
 
 export function resolveDatabasePath(env = process.env) {
-  const explicit = env.DSH_LOSSLESS_DB?.trim()
+  const explicit = env.DSH_SUPERLCM_DB?.trim() || env.DSH_LOSSLESS_DB?.trim()
   if (explicit) return resolve(explicit)
+
   const home = env.DSH_HOME?.trim() || join(homedir(), '.dsh')
-  return resolve(home, 'lossless-context', 'lcm.sqlite')
+  const current = resolve(home, 'SuperLcm', 'lcm.sqlite')
+  const legacy = resolve(home, 'lossless-context', 'lcm.sqlite')
+  if (!existsSync(current) && existsSync(legacy)) return legacy
+  return current
 }
 
-export class LosslessStore {
+export class SuperLcmStore {
   #db
   #closed = false
 
@@ -70,7 +74,7 @@ export class LosslessStore {
   }
 
   #assertOpen() {
-    if (this.#closed) throw new Error('lossless store is closed')
+    if (this.#closed) throw new Error('SuperLcm 存储已关闭 / SuperLcm store is closed')
   }
 
   #migrate() {
@@ -237,6 +241,7 @@ export class LosslessStore {
         `).all(fts, sessionId, capped)
         rows.forEach((row, index) => hits.set(row.node_id, { node: rowToNode(row), score: 1000 - index }))
       } catch {
+        // FTS 只是加速器；下面的规范化子串扫描才是权威结果。
         // FTS is an accelerator only. The normalized substring scan below is authoritative.
       }
     }
@@ -315,3 +320,7 @@ export class LosslessStore {
     this.#db.close()
   }
 }
+
+// 兼容旧版 SuperLcm、SuperLCM 与 dsh-lossless-context <= 0.2.x 的导出 / Compatibility exports for older SuperLcm, SuperLCM, and dsh-lossless-context <= 0.2.x.
+export { SuperLcmStore as SuperLCMStore }
+export { SuperLcmStore as LosslessStore }

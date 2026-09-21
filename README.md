@@ -1,10 +1,10 @@
-# dsh-lossless-context
+# SuperLcm
 
-A DSH-native lossless-recall context layer inspired by Lossless Claw / Lossless Context Management (LCM).
+A DSH-native SuperLcm lossless-recall context layer inspired by Lossless Claw / SuperLcm Management (LCM).
 
 It keeps **DeepSeek Harness's append-only session log as the only raw-history source of truth**. Compaction summaries receive stable recall node identifiers; a derived SQLite index records the summary DAG and exact source event sequence numbers. The model can later search, inspect, and expand old context without pretending that a summary is the original text.
 
-> Status: `0.2.0-alpha.7`. Rolling compaction is cache-aware, and the summarization provider/model can now be selected independently and changed live from the WebUI plugin settings. Exact raw recall remains backed by the DSH event log.
+> Status: `0.3.0-alpha.1`. Rolling compaction is cache-aware, and the summarization provider/model can now be selected independently and changed live from the WebUI plugin settings. Exact raw recall remains backed by the DSH event log.
 
 中文说明：[README.zh-CN.md](./README.zh-CN.md)
 
@@ -23,7 +23,7 @@ It keeps **DeepSeek Harness's append-only session log as the only raw-history so
 
 Compaction summaries may use a model different from the main Agent. The plugin directly exposes DSH `BasicCompactionEngine`'s existing `summarizationProvider` / `summarizationModel` route rather than creating a second router.
 
-In WebUI → Plugin configuration → Lossless Context, set both fields to any provider/model IDs routable by the installed DSH adapters, for example:
+In WebUI → Plugin configuration → SuperLcm, set both fields to any provider/model IDs routable by the installed DSH adapters, for example:
 
 ```text
 Summarizer Provider: openai
@@ -85,8 +85,8 @@ The bundled [`cordis.patch.yml`](./cordis.patch.yml) is deliberately safe by def
 
 ```yaml
 - insert:
-    - id: dsh-lossless-context-tools
-      name: dsh-lossless-context/tool
+    - id: SuperLcm-tools
+      name: SuperLcm/tool
 ```
 
 ### Stage B — replace the compaction provider
@@ -94,7 +94,7 @@ The bundled [`cordis.patch.yml`](./cordis.patch.yml) is deliberately safe by def
 DSH should have only one compaction provider in an isolated agent context. In the profile's existing compaction node, replace its plugin name with:
 
 ```yaml
-name: dsh-lossless-context
+name: SuperLcm
 ```
 
 Do not append this beside the official basic provider. Preserve the existing node id, isolation boundary, and known-good base compaction configuration unless a DSH version change requires otherwise. See [`examples/enable-compaction.patch.yml`](./examples/enable-compaction.patch.yml) for the recommended GPT-5.6 Sol persistent-worker policy.
@@ -106,14 +106,14 @@ Keep the plugin disabled until static checks and tests pass in the development p
 Default database path:
 
 ```text
-~/.dsh/lossless-context/lcm.sqlite
+~/.dsh/SuperLcm/lcm.sqlite
 ```
 
 Overrides:
 
 ```bash
 export DSH_HOME=/custom/dsh/home
-export DSH_LOSSLESS_DB=/absolute/path/lcm.sqlite
+export DSH_SUPERLCM_DB=/absolute/path/lcm.sqlite
 ```
 
 The database uses WAL mode and stores summaries, DAG edges, exact source sequence arrays, provider/model metadata, and a full-text index. It does not store duplicated raw event payloads.

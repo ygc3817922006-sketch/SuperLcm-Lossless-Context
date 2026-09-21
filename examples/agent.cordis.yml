@@ -1,4 +1,6 @@
-# Example only. Copy a shipped preset under a NEW preset id and edit the copy.
+# 仅供示例：请复制到新的 preset id 后再编辑。
+# Example only: copy this under a NEW preset id before editing.
+# 不要在原有压缩提供方旁边再添加第二个。
 # Do not add a second compaction provider beside the original one.
 - id: compaction
   name: cordis:group
@@ -7,9 +9,10 @@
     compaction: true
     toolResultPruner: true
   config:
-    - id: lossless-compaction
-      name: dsh-lossless-context
+    - id: SuperLcm-compaction
+      name: SuperLcm
       config:
+        # 这些选项会转发给 BasicCompactionEngine。
         # These options are forwarded to BasicCompactionEngine.
         auto: true
         thresholdRatio: 0.80

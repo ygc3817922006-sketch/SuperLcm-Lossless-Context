@@ -1,6 +1,7 @@
-# Cache-aware persistent context policy
+# 缓存感知的持久上下文策略 / Cache-aware persistent context policy
 
-This document defines the rolling policy used by `dsh-lossless-context` for a long-lived coding worker. The goal is not to minimize prompt size at any cost. It is to keep the model-visible context small enough to remain useful while avoiding unnecessary destruction of a warm provider prefix cache.
+本文定义 SuperLcm 使用的 rolling 策略。
+This document defines the rolling policy used by `SuperLcm` for a long-lived coding worker. The goal is not to minimize prompt size at any cost. It is to keep the model-visible context small enough to remain useful while avoiding unnecessary destruction of a warm provider prefix cache.
 
 ## Starting profile for GPT-5.6 Sol
 
@@ -58,7 +59,7 @@ A future leaf-preparation layer should therefore have an explicit non-authoritat
 
 Programmatic Tool Calling (PTC) is complementary to this policy. PTC should filter, aggregate, and parallelize mechanical tool work before returning to the model. Large grep output, file scans, test logs, and intermediate tool results should remain inside the code-mode runtime whenever possible, with only the useful conclusion returned to the active conversation.
 
-That reduces context generation at the source. Lossless context then preserves the genuinely useful history and exact recall path instead of spending most of its budget summarizing disposable tool noise.
+That reduces context generation at the source. SuperLcm then preserves the genuinely useful history and exact recall path instead of spending most of its budget summarizing disposable tool noise.
 
 Recall tools should follow the same principle: search narrowly first, expand bounded pages, and when PTC is available filter expanded material inside the program before returning it to the model.
 

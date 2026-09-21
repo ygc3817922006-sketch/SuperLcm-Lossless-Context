@@ -6,7 +6,7 @@ import { toolPairingBalancedBefore } from '@deepseek-ai/dsh-compaction'
 import { indexCompactionEvent } from './core.js'
 import { appendRecallEnvelope, extractChildNodeIds } from './marker.js'
 import { selectRollingRange } from './rolling.js'
-import { LosslessStore, resolveDatabasePath } from './store.js'
+import { SuperLcmStore, resolveDatabasePath } from './store.js'
 
 const ROLLING_CONFIG_KEYS = new Set([
   'mode',
@@ -82,7 +82,7 @@ function routeIsComplete(route) {
   return (route.provider.length === 0) === (route.model.length === 0)
 }
 
-const SETTINGS_NAMESPACE = 'lossless-context'
+const SETTINGS_NAMESPACE = 'SuperLcm'
 const SUMMARIZATION_ROUTE_SCHEMA = z.object({
   provider: z.string().default(''),
   model: z.string().default(''),
@@ -118,23 +118,33 @@ function compactedInputOf(input) {
     ?? input
 }
 
-function reportIndexFailure(error) {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error)
-  console.warn(`[dsh-lossless-context] failed to index committed compaction: ${message}`)
+function firstFoldableSurfaceIndex(session) {
+  const surfaceNodes = session?.surface?.nodes
+  if (!Array.isArray(surfaceNodes) || surfaceNodes.length === 0) return 0
+  const head = typeof session.eventAt === 'function' ? session.eventAt(surfaceNodes[0]) : undefined
+  return head?.type === 'system/message' ? 1 : 0
 }
 
-export class LosslessCompactionEngine extends BasicCompactionEngine {
+function reportIndexFailure(error) {
+  const message = error instanceof Error ? error.stack ?? error.message : String(error)
+  console.warn(`[SuperLcm] 已提交的压缩索引失败 / failed to index committed compaction: ${message}`)
+}
+
+export class SuperLcmCompactionEngine extends BasicCompactionEngine {
   constructor(ctx, config = {}) {
     const { base, rolling } = splitConfig(config)
     super(ctx, base)
     this.rollingConfig = rolling
-    this.losslessStore = new LosslessStore(resolveDatabasePath())
-    ctx.effect(() => () => this.losslessStore.close())
+    this.superLcmStore = new SuperLcmStore(resolveDatabasePath())
+    this.superlcmStore = this.superLcmStore
+    // 兼容 dsh-lossless-context <= 0.2.x 的旧属性 / Compatibility property for dsh-lossless-context <= 0.2.x.
+    this.losslessStore = this.superLcmStore
+    ctx.effect(() => () => this.superLcmStore.close())
 
     ctx.on('session/event', (session, event) => {
       if (event?.type !== 'compaction/summary') return
       try {
-        indexCompactionEvent(this.losslessStore, session, event)
+        indexCompactionEvent(this.superLcmStore, session, event)
       } catch (error) {
         reportIndexFailure(error)
       }
@@ -215,7 +225,7 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      ctx.logger?.warn?.(`[dsh-lossless-context] settings section unavailable: ${message}`)
+      ctx.logger?.warn?.(`[SuperLcm] 设置区域不可用 / settings section unavailable: ${message}`)
     }
   }
 
@@ -376,6 +386,7 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
       hardActiveTokens: this.rollingConfig.hardActiveTokens,
       activeTokens: measurement.totalTokens,
       cacheHot,
+      firstFoldableIndex: firstFoldableSurfaceIndex(session),
       isBalancedBefore: (seq) => toolPairingBalancedBefore(session, seq),
     })
   }
@@ -392,4 +403,7 @@ export class LosslessCompactionEngine extends BasicCompactionEngine {
   }
 }
 
-export default LosslessCompactionEngine
+// 兼容旧版 SuperLcm、SuperLCM 与 dsh-lossless-context <= 0.2.x 的导出 / Compatibility exports for older SuperLcm, SuperLCM, and dsh-lossless-context <= 0.2.x.
+export { SuperLcmCompactionEngine as SuperLCMCompactionEngine }
+export { SuperLcmCompactionEngine as LosslessCompactionEngine }
+export default SuperLcmCompactionEngine

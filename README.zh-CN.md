@@ -1,10 +1,10 @@
-# dsh-lossless-context
+# SuperLcm
 
-这是一个面向 DeepSeek Harness（DSH）的无损召回上下文插件，核心思路来自 Lossless Claw / Lossless Context Management（LCM，无损上下文管理）。
+这是一个面向 DeepSeek Harness（DSH）的 SuperLcm 无损召回上下文插件，核心思路来自 Lossless Claw / SuperLcm Management（LCM，无损上下文管理）。
 
 它把 **DSH 只追加的 Session Event Log（会话事件日志）作为唯一原文真源**。每次压缩摘要都会获得稳定的召回节点 ID；SQLite 只保存摘要 DAG（有向无环图）、父子关系和精确的源事件序号。模型以后可以搜索、描述和展开旧上下文，而不是把摘要冒充成原文。
 
-> 当前版本：`0.2.0-alpha.7`。rolling（滚动）压缩使用 cache-aware（缓存感知）策略；压缩摘要模型现在可以独立指定，并可在 WebUI 的插件设置页热更新。原始历史仍由 DSH Event Log 无损保留。
+> 当前版本：`0.3.0-alpha.1`。rolling（滚动）压缩使用 cache-aware（缓存感知）策略；压缩摘要模型现在可以独立指定，并可在 WebUI 的插件设置页热更新。原始历史仍由 DSH Event Log 无损保留。
 
 ## 已实现
 
@@ -20,7 +20,7 @@
 
 压缩摘要可以使用与主 Agent 不同的模型。插件直接复用 DSH 官方 `BasicCompactionEngine` 的 `summarizationProvider` / `summarizationModel` 路由，不建立第二套路由系统。
 
-在 WebUI → Plugin configuration → Lossless Context 中可以直接填写：
+在 WebUI → Plugin configuration → SuperLcm 中可以直接填写：
 
 ```text
 压缩 Provider: openai
@@ -46,7 +46,7 @@ DSH 当前的 Web 模型目录是 session-scoped（按会话作用域）的，�
 
 ## 与 gbrain 的边界
 
-`dsh-lossless-context` 管“本次 DSH 工作线程到底发生过什么”；gbrain 管跨会话、跨项目的稳定结论、历史决策和长期知识。两边不应自动双写。只有主代理确认某个结论已经稳定，才应通过单独流程沉淀到 gbrain。
+`SuperLcm` 管“本次 DSH 工作线程到底发生过什么”；gbrain 管跨会话、跨项目的稳定结论、历史决策和长期知识。两边不应自动双写。只有主代理确认某个结论已经稳定，才应通过单独流程沉淀到 gbrain。
 
 ## “无损”的准确含义
 
@@ -81,8 +81,8 @@ npm pack
 
 ```yaml
 - insert:
-    - id: dsh-lossless-context-tools
-      name: dsh-lossless-context/tool
+    - id: SuperLcm-tools
+      name: SuperLcm/tool
 ```
 
 ### 第二阶段：替换正式压缩提供方
@@ -90,7 +90,7 @@ npm pack
 同一个隔离 Agent 上只能保留一套 `ctx.compaction`。应在现有 compaction 节点上把插件名替换为：
 
 ```yaml
-name: dsh-lossless-context
+name: SuperLcm
 ```
 
 不能把它和 `dsh-compaction-basic` 并排追加。现有节点 ID、隔离层级和已验证的基础配置应尽量保持不变。GPT-5.6 Sol 的持久 Worker 推荐参数见 [`examples/enable-compaction.patch.yml`](./examples/enable-compaction.patch.yml)。
@@ -118,7 +118,7 @@ foldTiming: background
 默认路径：
 
 ```text
-~/.dsh/lossless-context/lcm.sqlite
+~/.dsh/SuperLcm/lcm.sqlite
 ```
 
 数据库启用 WAL（预写日志），保存摘要节点、DAG 边、源事件序号、模型/提供方信息和全文索引，不保存整份原始事件正文。

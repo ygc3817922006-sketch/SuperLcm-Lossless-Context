@@ -12,6 +12,7 @@ function sessionIdOf(session) {
 }
 
 function sessionEvents(session) {
+  // rc.2 提供不可变快照；旧宿主提供 events 数组。
   // rc.2 exposes immutable snapshots; older hosts expose an events array.
   const events = typeof session?.snapshotEvents === 'function'
     ? session.snapshotEvents()
@@ -128,8 +129,10 @@ function requireNode(store, sessionId, nodeId) {
 }
 
 /**
+ * 单个召回 DAG 节点的深度：原始折叠检查点为第 1 层，否则比最深子节点高一层。
  * Depth of one node in the recall DAG: level 1 for raw fold checkpoints, and
- * one above the deepest child otherwise. Cycle-safe for corrupted indexes.
+ * one above the deepest child otherwise.
+ * 对损坏的索引保持环安全 / Corruption-safe for damaged indexes.
  */
 export function nodeLevel(store, sessionId, nodeId) {
   const seen = new Set()
@@ -258,7 +261,7 @@ export function expandNode(store, session, {
   }
 }
 
-export function searchLosslessContext(store, session, query, { scope = 'both', limit = 20 } = {}) {
+export function searchSuperLcmContext(store, session, query, { scope = 'both', limit = 20 } = {}) {
   const sessionId = sessionIdOf(session)
   const capped = clampInteger(limit, 20, 1, 100)
   const normalizedScope = ['summary', 'events', 'both'].includes(scope) ? scope : 'both'
@@ -281,6 +284,11 @@ export function searchLosslessContext(store, session, query, { scope = 'both', l
       : searchSessionEvents(session, query, { limit: capped }),
   }
 }
+
+// 兼容旧版 SuperLcm、SuperLCM 与 dsh-lossless-context <= 0.2.x 的调用方。
+// Compatibility aliases for older SuperLCM and dsh-lossless-context <= 0.2.x consumers.
+export const searchSuperLCMContext = searchSuperLcmContext
+export const searchLosslessContext = searchSuperLcmContext
 
 export function doctorSession(store, session) {
   const sessionId = sessionIdOf(session)

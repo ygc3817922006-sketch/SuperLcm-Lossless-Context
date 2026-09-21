@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer'
 export const MARKER_VERSION = 1
 export const MARKER_PREFIX = 'dsh-lcm:v1:'
 const MARKER_RE = /<!--\s*dsh-lcm:v1:([A-Za-z0-9_-]+)\s*-->/g
-const VISIBLE_RE = /\n?(?:\[Lossless recall node [^\]]+\]|\[LCM:[^\]]+\])\n?/g
+const VISIBLE_RE = /\n?(?:\[SuperLcm:[^\]]+\]|\[SuperLcm recall node [^\]]+\]|\[Lossless recall node [^\]]+\]|\[LCM:[^\]]+\])\n?/g
 
 function uniqueStrings(values) {
   return [...new Set(values.filter(value => typeof value === 'string' && value.length > 0))]
@@ -117,7 +117,7 @@ export function appendRecallEnvelope(blocks, { id, children = [] }) {
   const childLabel = children.length === 0 ? '0' : `${children.length}`
   const text = [
     '',
-    `[LCM:${id}; children=${childLabel}; exact=lcm_expand]`,
+    `[SuperLcm:${id}; children=${childLabel}; exact=lcm_expand]`,
     marker,
   ].join('\n')
   return [...blocks, { type: 'text', text }]

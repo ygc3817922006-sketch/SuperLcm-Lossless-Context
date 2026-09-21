@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0-alpha.1 — 2026-09-21
+
+- 将包名和 WebUI 配置界面统一改名为 SuperLcm。/ Rename the package and WebUI configuration surface to SuperLcm.
+- 通过当前 `plugins.bundle.config` 宿主槽注册浏览器配置。/ Register browser configuration through the current `plugins.bundle.config` host slot.
+- 迁移期间保留旧导出和旧 SQLite 路径。/ Preserve legacy exports and the old SQLite location during migration.
+
 ## 0.2.0-alpha.9 — 2026-09-14
 
 - Read DSH rc.2 session events through `snapshotEvents()`, retaining the legacy array API for older hosts. Indexing, raw-event search, exact expansion and diagnostics use the same reader.
@@ -23,10 +29,7 @@
 
 ## 0.2.0-alpha.7 — 2026-09-01
 
-- Expose DSH's native `summarizationProvider` / `summarizationModel` route through
-  the lossless-context settings section. Both blank means “follow the current
-  Agent”; a dedicated summarizer requires both fields and applies live to later
-  compactions without plugin reload.
+- 通过 `SuperLcm` 设置区域暴露 DSH 原生的 `summarizationProvider` / `summarizationModel` 路由；两项留空表示“跟随当前 Agent 路由”。/ Expose DSH's native `summarizationProvider` / `summarizationModel` route through the `SuperLcm` settings section; both blank means “follow the current Agent route”. A dedicated summarizer requires both fields and applies live to later compactions without plugin reload.
 - The WebUI plugin card now exposes the summarizer provider/model as free-form
   adapter IDs, plus the complete cache-aware rolling policy. It deliberately
   avoids binding the session-scoped conversation ModelSelect to this global
@@ -83,8 +86,7 @@
   configuration (Plugin configuration) with the rolling-compaction
   tunables — tail message count, fold batch tokens, fold timing, compaction
   threshold and retention ratio — editable with Save/Discard staging.
-  Host side, the engine registers a `lossless-context` settings section via
-  `settings.installSection`; changes apply live to `rollingConfig`, and the
+  Host side, the engine registers a `SuperLcm` settings section via `settings.installSection`; 宿主侧引擎通过 `settings.installSection` 注册 `SuperLcm` 设置区域；changes apply live to `rollingConfig`, and the
   threshold/retention ratios are spread-replaced onto the frozen base config
   (a token-based retention form is dropped so the ratio takes effect). A
   validate hook rejects `retainRatio >= thresholdRatio` both on the host and

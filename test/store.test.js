@@ -1,13 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { LosslessStore, resolveDatabasePath } from '../src/store.js'
+import { SuperLcmStore, resolveDatabasePath } from '../src/store.js'
 
 async function withStore(run) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-lcm-store-'))
-  const store = new LosslessStore(join(dir, 'lcm.sqlite'))
+  const store = new SuperLcmStore(join(dir, 'lcm.sqlite'))
   try {
     await run(store, dir)
   } finally {
@@ -35,9 +35,22 @@ function node(overrides = {}) {
   }
 }
 
-test('resolveDatabasePath honors explicit database and DSH_HOME', () => {
-  assert.equal(resolveDatabasePath({ DSH_LOSSLESS_DB: '/tmp/custom.sqlite' }), '/tmp/custom.sqlite')
-  assert.equal(resolveDatabasePath({ DSH_HOME: '/tmp/dsh-home' }), '/tmp/dsh-home/lossless-context/lcm.sqlite')
+test('resolveDatabasePath honors explicit database', () => {
+  assert.equal(resolveDatabasePath({ DSH_SUPERLCM_DB: '/tmp/custom-superlcm.sqlite', DSH_LOSSLESS_DB: '/tmp/legacy.sqlite' }), '/tmp/custom-superlcm.sqlite')
+  assert.equal(resolveDatabasePath({ DSH_LOSSLESS_DB: '/tmp/legacy.sqlite' }), '/tmp/legacy.sqlite')
+})
+
+test('resolveDatabasePath selects the new home and preserves legacy fallback', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'SuperLcm-home-'))
+  try {
+    assert.equal(resolveDatabasePath({ DSH_HOME: home }), join(home, 'SuperLcm', 'lcm.sqlite'))
+    const legacyDir = join(home, 'lossless-context')
+    await mkdir(legacyDir, { recursive: true })
+    await writeFile(join(legacyDir, 'lcm.sqlite'), '')
+    assert.equal(resolveDatabasePath({ DSH_HOME: home }), join(home, 'lossless-context', 'lcm.sqlite'))
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
 })
 
 test('store persists nodes, exact source pointers, and DAG edges', async () => withStore(store => {

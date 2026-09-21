@@ -1,4 +1,4 @@
-# Architecture
+# 架构 / Architecture
 
 ## Source-of-truth rule
 
@@ -10,7 +10,7 @@ DSH append-only session event log
         └── surface replacement metadata
                  │
                  ▼
-       dsh-lossless-context
+       SuperLcm
         ├── stable recall marker in each summary
         ├── summary DAG edges
         ├── exact source event sequence pointers
@@ -21,7 +21,8 @@ The DSH log is authoritative. SQLite may be deleted and rebuilt. The plugin neve
 
 ## Compaction path
 
-`LosslessCompactionEngine` subclasses the official `BasicCompactionEngine`. It deliberately does not reimplement pressure calculation, retention, cancellation, transaction boundaries, surface replacement, or convergence. It overrides `summarize()` only:
+`SuperLcmCompactionEngine` 继承官方 `BasicCompactionEngine`。
+`SuperLcmCompactionEngine` subclasses the official `BasicCompactionEngine`. It deliberately does not reimplement pressure calculation, retention, cancellation, transaction boundaries, surface replacement, or convergence. It overrides `summarize()` only:
 
 1. Inspect the input region selected by DSH.
 2. Extract recall markers from any older checkpoint summaries inside that region.
@@ -101,6 +102,6 @@ The alpha does not yet implement:
 - embedding retrieval;
 - cross-session knowledge promotion;
 - retention policies for stale SQLite namespaces;
-- full parity with Lossless Claw's operational and diagnostic surface.
+- 与 Lossless Claw 的运行和诊断界面完全对齐 / full parity with Lossless Claw's operational and diagnostic surface.
 
 These should be added behind explicit contracts rather than by bypassing the DSH session transaction.

@@ -2,12 +2,30 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { selectRollingRange } from '../src/rolling.js'
 import { nodeLevel } from '../src/core.js'
-import { LosslessStore } from '../src/store.js'
+import { SuperLcmStore } from '../src/store.js'
 
 test('rolling selection keeps the fresh tail and folds only the older head', () => {
   const nodes = [1, 2, 3, 4, 5, 6, 7, 8].map(seq => ({ seq, tokens: 10000 }))
   const selection = selectRollingRange(nodes, nodes.map(node => node.seq), { tailCount: 3, minRetainTokens: 30000, foldBatchTokens: 20000, pressureFoldTokens: 10000, softActiveTokens: 100000, hardActiveTokens: 120000, activeTokens: 80000, cacheHot: false })
   assert.deepEqual(selection, { start: 1, end: 5, foldTokens: 50000, tailNodes: 3, tailTokens: 30000, tailCountRelaxed: false, activeTokens: 80000, cacheHot: false, reason: 'cold-batch' })
+})
+
+test('rolling selection never folds the protected system head', () => {
+  const nodes = Array.from({ length: 8 }, (_, index) => ({ seq: index, tokens: 10000 }))
+  const selection = selectRollingRange(nodes, nodes.map(node => node.seq), {
+    firstFoldableIndex: 1,
+    tailCount: 3,
+    minRetainTokens: 30000,
+    foldBatchTokens: 20000,
+    pressureFoldTokens: 10000,
+    softActiveTokens: 100000,
+    hardActiveTokens: 120000,
+    activeTokens: 80000,
+    cacheHot: false,
+  })
+  assert.equal(selection.start, 1)
+  assert.equal(selection.end, 4)
+  assert.equal(selection.foldTokens, 40000)
 })
 
 test('hot cache defers a routine batch below the soft cap', () => {
@@ -66,7 +84,7 @@ test('rolling selection returns null for empty, mismatched, or insufficient span
 })
 
 test('node level grows with children and survives corrupted indexes', () => {
-  const store = new LosslessStore(':memory:')
+  const store = new SuperLcmStore(':memory:')
   try {
     store.upsertNode({ sessionId: 's', nodeId: 'level-1-node-a', summary: [], summaryText: 'a', childIds: [], sourceSeqs: [1, 2], createdAt: 1 })
     store.upsertNode({ sessionId: 's', nodeId: 'level-2-node-b', summary: [], summaryText: 'b', childIds: ['level-1-node-a'], sourceSeqs: [3] })

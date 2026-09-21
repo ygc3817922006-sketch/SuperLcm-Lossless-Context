@@ -1,19 +1,24 @@
-# ILLUSTRATIVE ONLY.
-# Do not append this beside an existing compaction provider.
-# In the actual profile patch, locate the existing compaction node and change
-# that node's plugin name to dsh-lossless-context while preserving its id,
-# isolation boundary, and validated base configuration.
+# 仅供说明，不要直接并列添加到已有压缩提供方旁边。
+# ILLUSTRATIVE ONLY: do not append this beside an existing compaction provider.
+# 在实际 profile 补丁中，找到现有压缩节点并将插件名改为 SuperLcm，
+# 保留其 id、隔离边界和已验证的基础配置。
+# In the actual profile patch, change the existing node's plugin name to SuperLcm,
+# preserving its id, isolation boundary, and validated base configuration.
 #
+# 以下数值是长期 GPT-5.6 Sol Worker 的起始默认值。
 # The values below are starting defaults for a long-lived GPT-5.6 Sol worker.
+# 小上下文模型应按比例降低活动上下文上限。
 # Smaller-context models should use proportionally smaller active-context caps.
 
 - insert:
-    - id: dsh-lossless-context-engine
-      name: dsh-lossless-context
+    - id: SuperLcm-engine
+      name: SuperLcm
       disabled: true
       config:
         mode: rolling
+        # 两项都留空时跟随当前 Agent 路由。
         # Leave both blank to summarize with the current Agent route.
+        # 两项同时填写即可使用独立压缩模型，例如：
         # Set both to use a dedicated compaction model, for example:
         # summarizationProvider: openai
         # summarizationModel: gpt-5.6-sol
@@ -27,10 +32,12 @@
         hardActiveTokens: 220000
         cacheTtlSeconds: 1800
         foldTiming: background
+        # 紧急/提供方溢出策略继承 DSH 基础压缩。
         # Emergency / provider-overflow policy inherited from DSH basic compaction.
         thresholdRatio: 0.60
         retainRatio: 0.16
 
-# Keep disabled during development. The exact replace/remove operation depends
-# on the DSH profile's current Cordis tree; verify that only one ctx.compaction
-# provider remains before setting disabled: false.
+# 开发期间保持禁用；启用前确认 ctx.compaction 只剩一个提供方。
+# 开发期间保持禁用；将 disabled 改为 false 前确认只剩一个 ctx.compaction 提供方。
+# Keep disabled during development; verify only one ctx.compaction provider
+# remains before setting disabled: false.

@@ -1,3 +1,4 @@
+# 仅挂工具的默认组合包补丁 / Tools-only patch for the default bundle.
 - insert:
-    - id: dsh-lossless-context-tools
-      name: dsh-lossless-context/tool
+    - id: SuperLcm-tools
+      name: SuperLcm/tool

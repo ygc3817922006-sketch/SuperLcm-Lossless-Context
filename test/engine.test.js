@@ -3,13 +3,13 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import LosslessCompactionEngine from '../src/engine.js'
+import SuperLcmCompactionEngine, { LosslessCompactionEngine } from '../src/engine.js'
 import { appendRecallEnvelope, markerFromSummary } from '../src/marker.js'
 
 async function withEngine(run, config = { thresholdRatio: 0.8 }) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-lcm-engine-'))
-  const previous = process.env.DSH_LOSSLESS_DB
-  process.env.DSH_LOSSLESS_DB = join(dir, 'lcm.sqlite')
+  const previous = process.env.DSH_SUPERLCM_DB
+  process.env.DSH_SUPERLCM_DB = join(dir, 'lcm.sqlite')
   const listeners = new Map()
   const disposers = []
   const ctx = {
@@ -18,15 +18,19 @@ async function withEngine(run, config = { thresholdRatio: 0.8 }) {
     on(name, listener) { listeners.set(name, listener); return () => listeners.delete(name) },
     effect(factory) { const dispose = factory(); if (typeof dispose === 'function') disposers.push(dispose); return dispose },
   }
-  const engine = new LosslessCompactionEngine(ctx, config)
+  const engine = new SuperLcmCompactionEngine(ctx, config)
   try { await run({ engine, listeners }) }
   finally {
     for (const dispose of disposers.reverse()) await dispose()
-    if (previous === undefined) delete process.env.DSH_LOSSLESS_DB
-    else process.env.DSH_LOSSLESS_DB = previous
+    if (previous === undefined) delete process.env.DSH_SUPERLCM_DB
+    else process.env.DSH_SUPERLCM_DB = previous
     await rm(dir, { recursive: true, force: true })
   }
 }
+
+test('legacy engine export remains an alias', () => {
+  assert.equal(LosslessCompactionEngine, SuperLcmCompactionEngine)
+})
 
 test('engine delegates to BasicCompactionEngine and appends a parent marker', async () => withEngine(async ({ engine }) => {
   const childSummary = appendRecallEnvelope([{ type: 'text', text: 'older checkpoint' }], { id: 'child-12345678' })
@@ -77,6 +81,22 @@ test('planRolling uses full active-context tokens and the fresh token floor', as
   assert.ok(selection.tailTokens >= 32000)
   assert.equal(selection.activeTokens, 180000)
 }))
+
+test('planRolling protects a system message at surface node zero', async () => withEngine(async ({ engine }) => {
+  const events = [
+    { seq: 0, type: 'system/message' },
+    ...Array.from({ length: 40 }, (_, index) => ({ seq: index + 1, type: 'user/message' })),
+  ]
+  const nodes = events.map(event => ({ seq: event.seq, tokens: 10000 }))
+  const session = {
+    surface: { nodes: nodes.map(node => node.seq) },
+    measurement: { nodes, totalTokens: 410000 },
+    eventAt(seq) { return events.find(event => event.seq === seq) },
+  }
+  const selection = engine.planRolling({ session }, false)
+  assert.equal(selection.start, 1)
+  assert.equal(selection.end, 16)
+}), { thresholdRatio: 0.8 })
 
 test('soft pressure is awaited even when background timing is enabled', async () => withEngine(async ({ engine, listeners }) => {
   await Promise.resolve()
@@ -149,11 +169,11 @@ test('committed compaction events are indexed after the DSH transaction', async 
   const session = { id: 'session-engine', events: [] }
   const event = { seq: 9, time: 100, type: 'compaction/summary', data: { compactionId: 'c1', summary, shadowedSeqs: [2, 4] } }
   listeners.get('session/event')(session, event)
-  assert.equal(engine.losslessStore.getNode('session-engine', 'node-12345678').summaryText, 'committed checkpoint')
+  assert.equal(engine.superLcmStore.getNode('session-engine', 'node-12345678').summaryText, 'committed checkpoint')
 }))
 
 test('post-commit SQLite failure is contained instead of corrupting the DSH transaction', async () => withEngine(async ({ engine, listeners }) => {
-  engine.losslessStore.close()
+  engine.superLcmStore.close()
   const summary = appendRecallEnvelope([{ type: 'text', text: 'still canonical in log' }], { id: 'node-87654321' })
   const originalWarn = console.warn
   console.warn = () => {}

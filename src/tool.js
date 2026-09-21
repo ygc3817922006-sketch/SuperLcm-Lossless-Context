@@ -4,11 +4,11 @@ import {
   doctorSession,
   expandNode,
   reindexSession,
-  searchLosslessContext,
+  searchSuperLcmContext,
 } from './core.js'
-import { LosslessStore, resolveDatabasePath } from './store.js'
+import { SuperLcmStore, resolveDatabasePath } from './store.js'
 
-export const name = 'dsh-lossless-context-tools'
+export const name = 'SuperLcm-tools'
 export const inject = ['tools']
 
 function requireSession(exec) {
@@ -32,7 +32,7 @@ function positiveInteger(value, fallback, max) {
   return Math.min(value, max)
 }
 
-export function createLosslessToolDefinitions(store) {
+export function createSuperLcmToolDefinitions(store) {
   const jsonOutput = {
     schema: { type: 'json' },
     render: (_args, value) => asJsonBlocks(value),
@@ -51,12 +51,12 @@ export function createLosslessToolDefinitions(store) {
       execute(args, exec) {
         const session = requireSession(exec)
         reindexSession(store, session)
-        return Promise.resolve(searchLosslessContext(store, session, args.query, {
+        return Promise.resolve(searchSuperLcmContext(store, session, args.query, {
           scope: canonicalScope(args.scope),
           limit: positiveInteger(args.limit, 20, 100),
         }))
       },
-      presentCall: args => ({ card: 'generic', title: `Search lossless context: ${String(args.query ?? '')}`, kind: 'search', rawInput: args }),
+      presentCall: args => ({ card: 'generic', title: `Search SuperLcm context: ${String(args.query ?? '')}`, kind: 'search', rawInput: args }),
     }),
 
     defineTool({
@@ -113,7 +113,7 @@ export function createLosslessToolDefinitions(store) {
         reindexSession(store, session)
         const limit = positiveInteger(args.limit, 3, 10)
         const totalBudget = positiveInteger(args.max_chars, 30000, 100000)
-        const search = searchLosslessContext(store, session, args.query, { scope: 'summary', limit })
+        const search = searchSuperLcmContext(store, session, args.query, { scope: 'summary', limit })
         const perNode = Math.max(1000, Math.floor(totalBudget / Math.max(1, search.summaries.length)))
         return Promise.resolve({
           sessionId: search.sessionId,
@@ -128,7 +128,7 @@ export function createLosslessToolDefinitions(store) {
           })),
         })
       },
-      presentCall: args => ({ card: 'generic', title: `Search and expand lossless context: ${String(args.query ?? '')}`, kind: 'search', rawInput: args }),
+      presentCall: args => ({ card: 'generic', title: `Search and expand SuperLcm context: ${String(args.query ?? '')}`, kind: 'search', rawInput: args }),
     }),
 
     defineTool({
@@ -143,12 +143,12 @@ export function createLosslessToolDefinitions(store) {
         const result = reindexSession(store, session, { rebuild: args.rebuild === true })
         return Promise.resolve({ ...result, stats: store.stats(session.id ?? session.header?.id) })
       },
-      presentCall: args => ({ card: 'generic', title: args.rebuild === true ? 'Rebuild lossless context index' : 'Refresh lossless context index', kind: 'execute', rawInput: args }),
+      presentCall: args => ({ card: 'generic', title: args.rebuild === true ? 'Rebuild SuperLcm index' : 'Refresh SuperLcm index', kind: 'execute', rawInput: args }),
     }),
 
     defineTool({
       name: 'lcm_doctor',
-      description: 'Check the current session\'s lossless-context DAG, exact source pointers, duplicate ids, missing nodes, dangling child edges, and SQLite integrity.',
+      description: '检查当前会话的 SuperLcm DAG、精确源指针、重复 ID、缺失节点、悬空子边和 SQLite 完整性 / Check the current session\'s SuperLcm DAG, exact source pointers, duplicate ids, missing nodes, dangling child edges, and SQLite integrity.',
       parameters: {
         repair: { type: 'boolean', description: 'Rebuild the derived SQLite index before checking. Raw session events remain untouched. Default false.' },
       },
@@ -159,15 +159,19 @@ export function createLosslessToolDefinitions(store) {
         const reindex = reindexSession(store, session, { rebuild: repair })
         return Promise.resolve({ repair, reindex, report: doctorSession(store, session) })
       },
-      presentCall: args => ({ card: 'generic', title: args.repair === true ? 'Repair and check lossless context' : 'Check lossless context', kind: 'read', rawInput: args }),
+      presentCall: args => ({ card: 'generic', title: args.repair === true ? 'Repair and check SuperLcm' : 'Check SuperLcm', kind: 'read', rawInput: args })
     }),
   ]
 }
 
+// 兼容旧版 SuperLcm、SuperLCM 与 dsh-lossless-context <= 0.2.x 的导出 / Compatibility exports for older SuperLcm, SuperLCM, and dsh-lossless-context <= 0.2.x.
+export const createSuperLCMToolDefinitions = createSuperLcmToolDefinitions
+export const createLosslessToolDefinitions = createSuperLcmToolDefinitions
+
 export function apply(ctx) {
-  const store = new LosslessStore(resolveDatabasePath())
+  const store = new SuperLcmStore(resolveDatabasePath())
   ctx.effect(() => () => store.close())
-  for (const definition of createLosslessToolDefinitions(store)) {
+  for (const definition of createSuperLcmToolDefinitions(store)) {
     ctx.tools.register(definition)
   }
 }

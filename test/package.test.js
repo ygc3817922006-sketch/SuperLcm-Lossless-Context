@@ -12,8 +12,8 @@ async function text(path) {
 
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
-  assert.equal(pkg.name, 'dsh-lossless-context')
-  assert.equal(pkg.version, '0.2.0-alpha.9')
+  assert.equal(pkg.name, 'SuperLcm')
+  assert.equal(pkg.version, '0.3.0-alpha.1')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -24,6 +24,7 @@ test('package exports the backend and all stable library leaves', async () => {
   })
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(pkg.dsh.client.platform, 'web')
+  assert.equal(pkg.dsh.client.immediately, true)
   assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-settings-plugins'))
   assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-api-remotes'))
   assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-api-session-controller'))
@@ -42,12 +43,15 @@ test('web settings expose an atomic catalog-backed summarizer route and current 
   assert.match(client, /foldBatchTokens:\s*64000/)
   assert.match(client, /softActiveTokens:\s*160000/)
   assert.match(client, /hardActiveTokens:\s*220000/)
+  assert.match(client, /plugins\.bundle\.config/)
+  assert.match(client, /key:\s*"SuperLcm"/)
+  assert.doesNotMatch(client, /settings\.plugin\.item/)
 })
 
 test('default bundle is safe: tools are mounted but no second compaction provider is auto-mounted', async () => {
   const patch = await text('cordis.patch.yml')
-  assert.match(patch, /dsh-lossless-context\/tool/)
-  assert.doesNotMatch(patch, /^\s*name:\s*dsh-lossless-context\s*$/m)
+  assert.match(patch, /SuperLcm\/tool/)
+  assert.doesNotMatch(patch, /^\s*name:\s*SuperLcm\s*$/m)
   assert.doesNotMatch(patch, /dsh-compaction-basic/)
 })
 

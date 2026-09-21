@@ -4,8 +4,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { appendRecallEnvelope } from '../src/marker.js'
-import { LosslessStore } from '../src/store.js'
-import { apply, createLosslessToolDefinitions } from '../src/tool.js'
+import { SuperLcmStore } from '../src/store.js'
+import { apply, createSuperLcmToolDefinitions } from '../src/tool.js'
 
 const EXPECTED_NAMES = [
   'lcm_grep',
@@ -18,7 +18,7 @@ const EXPECTED_NAMES = [
 
 async function withDefinitions(run) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-lcm-tools-'))
-  const store = new LosslessStore(join(dir, 'lcm.sqlite'))
+  const store = new SuperLcmStore(join(dir, 'lcm.sqlite'))
   const summary = appendRecallEnvelope([{ type: 'text', text: 'historical compiler decision' }], {
     id: 'node-12345678',
   })
@@ -30,7 +30,7 @@ async function withDefinitions(run) {
     ],
   }
   try {
-    await run({ store, session, definitions: createLosslessToolDefinitions(store) })
+    await run({ store, session, definitions: createSuperLcmToolDefinitions(store) })
   } finally {
     store.close()
     await rm(dir, { recursive: true, force: true })

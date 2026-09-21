@@ -1,4 +1,4 @@
-# Validation contract
+# 验收合同 / Validation contract
 
 ## Automated checks
 
@@ -40,7 +40,8 @@ Automated contract tests are necessary but not sufficient. Before enabling the c
 2. Load the tools-only bundle with the engine disabled.
 3. Open a disposable session and confirm all six tools are visible.
 4. Call `lcm_doctor` and confirm SQLite opens at the intended path.
-5. Replace, rather than append, the existing compaction provider with `dsh-lossless-context`.
+5. 替换而不是追加现有压缩提供方为 `SuperLcm`。
+Replace, rather than append, the existing compaction provider with `SuperLcm`.
 6. Generate enough harmless context to trigger one real DSH compaction.
 7. Inspect the committed `compaction/summary` event and confirm it contains one `dsh-lcm:v1` marker.
 8. Run `lcm_reindex` and confirm one node is indexed.
@@ -67,4 +68,5 @@ Do not enable the plugin in the primary profile if any of these occur:
 
 ## Current certificate boundary
 
-`0.1.0-alpha.1` has an automated source-level test certificate only. A real DSH desktop/profile Agent-loop certificate must be produced on the target installation and pinned to its DSH version and profile manifest.
+`0.3.0-alpha.1` currently has an automated source-level test certificate; the profile certificate is the real runtime gate.
+`0.3.0-alpha.1` 当前只有源码级自动测试证书；profile 证书仍以真实运行时验收为准。 A real DSH desktop/profile Agent-loop certificate must be produced on the target installation and pinned to its DSH version and profile manifest.

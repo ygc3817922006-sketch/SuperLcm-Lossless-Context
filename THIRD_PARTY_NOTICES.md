@@ -1,4 +1,4 @@
-# Third-party notices
+# 第三方声明 / Third-party notices
 
 This project is an independent DeepSeek Harness plugin.
 

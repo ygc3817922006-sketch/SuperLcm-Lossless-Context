@@ -9,15 +9,15 @@ import {
   expandNode,
   nodeFromCompactionEvent,
   reindexSession,
-  searchLosslessContext,
+  searchSuperLcmContext,
   searchSessionEvents,
 } from '../src/core.js'
 import { appendRecallEnvelope } from '../src/marker.js'
-import { LosslessStore } from '../src/store.js'
+import { SuperLcmStore } from '../src/store.js'
 
 async function fixture(run) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-lcm-core-'))
-  const store = new LosslessStore(join(dir, 'lcm.sqlite'))
+  const store = new SuperLcmStore(join(dir, 'lcm.sqlite'))
   const huge = 'BEGIN-' + '0123456789'.repeat(350) + '-END'
   const childSummary = appendRecallEnvelope([{ type: 'text', text: 'child checkpoint about H800 profiling' }], {
     id: 'child-12345678',
@@ -127,11 +127,11 @@ test('search covers summary nodes and raw events independently', async () => fix
   reindexSession(store, session)
   assert.equal(searchSessionEvents(session, 'more work')[0].seq, 4)
 
-  const summaryOnly = searchLosslessContext(store, session, 'optimization route', { scope: 'summary' })
+  const summaryOnly = searchSuperLcmContext(store, session, 'optimization route', { scope: 'summary' })
   assert.equal(summaryOnly.summaries[0].nodeId, 'parent-12345678')
   assert.deepEqual(summaryOnly.events, [])
 
-  const eventsOnly = searchLosslessContext(store, session, 'H800 performance', { scope: 'events' })
+  const eventsOnly = searchSuperLcmContext(store, session, 'H800 performance', { scope: 'events' })
   assert.equal(eventsOnly.events[0].seq, 0)
   assert.deepEqual(eventsOnly.summaries, [])
 }))

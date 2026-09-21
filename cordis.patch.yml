@@ -1,6 +1,8 @@
+# 安全默认的组合包层：只挂载召回与修复工具。
 # Safe-by-default bundle layer: install recall/repair tools only.
+# 压缩引擎不会自动挂载，因为每个隔离 Agent 只能有一个 ctx.compaction 提供方。
 # The compaction engine is intentionally NOT auto-mounted because DSH permits
 # only one ctx.compaction provider per isolated agent context. See README.
 - insert:
-    - id: dsh-lossless-context-tools
-      name: dsh-lossless-context/tool
+    - id: SuperLcm-tools
+      name: SuperLcm/tool

@@ -1,6 +1,7 @@
 /**
- * Rolling-mode surface selection for the lossless compaction engine.
+ * 滚动模式的表面选区策略 / Rolling-mode surface selection for SuperLcm compaction.
  *
+ * 缓存感知策略同时按表面节点数和 Token 预算保留最新原文尾部。
  * The cache-aware policy keeps a fresh verbatim tail by both surface-node
  * count and token budget. Routine mutations wait for a larger cold-cache
  * commit batch; active-context pressure can override that delay with a smaller
@@ -24,18 +25,19 @@ function totalTokenCount(nodes) {
 }
 
 function tailBoundary(pricedNodes, surfaceSeqs, options) {
+  const firstFoldableIndex = options.firstFoldableIndex ?? 0
   let keepFromIdx = pricedNodes.length
   let keptNodes = 0
   let keptTokens = 0
 
-  for (let index = pricedNodes.length - 1; index >= 0; index -= 1) {
+  for (let index = pricedNodes.length - 1; index >= firstFoldableIndex; index -= 1) {
     keepFromIdx = index
     keptNodes += 1
     keptTokens += tokenCountOf(pricedNodes[index])
     if (keptNodes >= options.tailCount && keptTokens >= options.minRetainTokens) break
   }
 
-  while (keepFromIdx > 0 && !(options.isBalancedBefore?.(surfaceSeqs[keepFromIdx]) ?? true)) {
+  while (keepFromIdx > firstFoldableIndex && !(options.isBalancedBefore?.(surfaceSeqs[keepFromIdx]) ?? true)) {
     keepFromIdx -= 1
     keptNodes += 1
     keptTokens += tokenCountOf(pricedNodes[keepFromIdx])
@@ -65,26 +67,33 @@ export function selectRollingRange(pricedNodes, surfaceSeqs, options = {}) {
   const activeTokens = nonNegativeInteger(options.activeTokens, totalTokenCount(pricedNodes))
   const cacheHot = options.cacheHot === true
   const hardPressure = activeTokens >= hardActiveTokens
+  const firstFoldableIndex = Math.min(
+    nonNegativeInteger(options.firstFoldableIndex, 0),
+    pricedNodes.length,
+  )
 
   let boundary = tailBoundary(pricedNodes, surfaceSeqs, {
     tailCount,
     minRetainTokens,
+    firstFoldableIndex,
     isBalancedBefore: options.isBalancedBefore,
   })
 
   let tailCountRelaxed = false
-  if (boundary.keepFromIdx === 0 && hardPressure && tailCount > 1) {
+  if (boundary.keepFromIdx <= firstFoldableIndex && hardPressure && tailCount > 1) {
     boundary = tailBoundary(pricedNodes, surfaceSeqs, {
       tailCount: 1,
       minRetainTokens,
+      firstFoldableIndex,
       isBalancedBefore: options.isBalancedBefore,
     })
-    tailCountRelaxed = boundary.keepFromIdx > 0
+    tailCountRelaxed = boundary.keepFromIdx > firstFoldableIndex
   }
-  if (boundary.keepFromIdx === 0) return null
+
+  if (boundary.keepFromIdx <= firstFoldableIndex) return null
 
   let foldTokens = 0
-  for (let index = 0; index < boundary.keepFromIdx; index += 1) {
+  for (let index = firstFoldableIndex; index < boundary.keepFromIdx; index += 1) {
     foldTokens += tokenCountOf(pricedNodes[index])
   }
   if (foldTokens <= 0) return null
@@ -101,7 +110,7 @@ export function selectRollingRange(pricedNodes, surfaceSeqs, options = {}) {
   }
 
   return {
-    start: surfaceSeqs[0],
+    start: surfaceSeqs[firstFoldableIndex],
     end: surfaceSeqs[boundary.keepFromIdx - 1],
     foldTokens,
     tailNodes: pricedNodes.length - boundary.keepFromIdx,
