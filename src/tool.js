@@ -114,18 +114,26 @@ export function createSuperLcmToolDefinitions(store) {
         const limit = positiveInteger(args.limit, 3, 10)
         const totalBudget = positiveInteger(args.max_chars, 30000, 100000)
         const search = searchSuperLcmContext(store, session, args.query, { scope: 'summary', limit })
-        const perNode = Math.max(1000, Math.floor(totalBudget / Math.max(1, search.summaries.length)))
+        let remaining = totalBudget
+        const matches = search.summaries.map((hit, index) => {
+          const remainingMatches = search.summaries.length - index
+          const allocation = remaining === 0 ? 0 : Math.max(1, Math.floor(remaining / remainingMatches))
+          if (allocation === 0) return { hit, expansion: null }
+          const expansion = expandNode(store, session, {
+            nodeId: hit.nodeId,
+            maxChars: allocation,
+            recursiveDepth: 1,
+          })
+          const used = expansion.chunks.reduce((total, chunk) => total + chunk.content.length, 0)
+          remaining = Math.max(0, remaining - used)
+          return { hit, expansion }
+        })
         return Promise.resolve({
           sessionId: search.sessionId,
           query: args.query,
-          matches: search.summaries.map(hit => ({
-            hit,
-            expansion: expandNode(store, session, {
-              nodeId: hit.nodeId,
-              maxChars: perNode,
-              recursiveDepth: 1,
-            }),
-          })),
+          maxChars: totalBudget,
+          returnedChars: totalBudget - remaining,
+          matches,
         })
       },
       presentCall: args => ({ card: 'generic', title: `Search and expand SuperLcm context: ${String(args.query ?? '')}`, kind: 'search', rawInput: args }),
@@ -156,10 +164,10 @@ export function createSuperLcmToolDefinitions(store) {
       execute(args, exec) {
         const session = requireSession(exec)
         const repair = args.repair === true
-        const reindex = reindexSession(store, session, { rebuild: repair })
+        const reindex = repair ? reindexSession(store, session, { rebuild: true }) : null
         return Promise.resolve({ repair, reindex, report: doctorSession(store, session) })
       },
-      presentCall: args => ({ card: 'generic', title: args.repair === true ? 'Repair and check SuperLcm' : 'Check SuperLcm', kind: 'read', rawInput: args })
+      presentCall: args => ({ card: 'generic', title: args.repair === true ? 'Repair and check SuperLcm' : 'Check SuperLcm', kind: args.repair === true ? 'execute' : 'read', rawInput: args })
     }),
   ]
 }

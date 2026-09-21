@@ -26,7 +26,10 @@ async function withDefinitions(run) {
     id: 'session-tools',
     events: [
       { seq: 7, type: 'user/message', time: 1, data: { content: [{ type: 'text', text: 'original contract wording' }] } },
-      { seq: 12, type: 'compaction/summary', time: 2, data: { compactionId: 'c', summary, shadowedSeqs: [7] } },
+      { seq: 8, type: 'compaction/start', time: 2, data: { compactionId: 'c' } },
+      { seq: 9, type: 'compaction/summary', time: 3, data: { compactionId: 'c', summary, shadowedSeqs: [7] } },
+      { seq: 10, type: 'user/message', time: 4, data: { content: summary, source: { kind: 'plugin', plugin: 'compact', compactionId: 'c' } }, surfaceOp: { op: 'replace' }, sourceEventSeqs: [8, 9, 7] },
+      { seq: 11, type: 'compaction/end', time: 5, data: { compactionId: 'c' } },
     ],
   }
   try {
@@ -62,6 +65,41 @@ test('grep, describe and exact expand operate through the real core', async () =
   assert.equal(exact.chunks[0].seq, 7)
   assert.match(exact.chunks[0].content, /original contract wording/)
   assert.equal(exact.next, null)
+}))
+
+
+test('expand query enforces max_chars across all matches', async () => withDefinitions(async ({ store, definitions, session }) => {
+  const exec = { agent: { session } }
+  const grep = definitions.find(definition => definition.name === 'lcm_grep')
+  await grep.execute({ query: 'compiler decision', scope: 'summary' }, exec)
+  store.upsertNode({
+    sessionId: session.id,
+    nodeId: 'node-87654321',
+    createdAt: 99,
+    summary: [{ type: 'text', text: 'another compiler decision' }],
+    summaryText: 'another compiler decision',
+    childIds: [],
+    sourceSeqs: [7],
+    status: 'ready',
+  })
+  const expandQuery = definitions.find(definition => definition.name === 'lcm_expand_query')
+  const result = await expandQuery.execute({ query: 'compiler decision', limit: 2, max_chars: 1 }, exec)
+  assert.equal(result.matches.length, 2)
+  assert.ok(result.returnedChars <= 1)
+  assert.ok(result.matches.flatMap(match => match.expansion?.chunks ?? []).reduce((n, chunk) => n + chunk.content.length, 0) <= 1)
+}))
+
+test('doctor is read-only unless repair is explicitly true', async () => withDefinitions(async ({ store, definitions, session }) => {
+  const exec = { agent: { session } }
+  const doctor = definitions.find(definition => definition.name === 'lcm_doctor')
+  const observed = await doctor.execute({ repair: false }, exec)
+  assert.equal(observed.reindex, null)
+  assert.equal(observed.report.ok, false)
+  assert.equal(store.stats(session.id).nodeCount, 0)
+
+  const repaired = await doctor.execute({ repair: true }, exec)
+  assert.equal(repaired.reindex.indexed, 1)
+  assert.equal(repaired.report.ok, true)
 }))
 
 test('apply registers tools and owns SQLite lifetime as a Cordis effect', async () => {

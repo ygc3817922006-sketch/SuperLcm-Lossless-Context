@@ -21,18 +21,18 @@ The DSH log is authoritative. SQLite may be deleted and rebuilt. The plugin neve
 
 ## Compaction path
 
-`SuperLcmCompactionEngine` 继承官方 `BasicCompactionEngine`。
-`SuperLcmCompactionEngine` subclasses the official `BasicCompactionEngine`. It deliberately does not reimplement pressure calculation, retention, cancellation, transaction boundaries, surface replacement, or convergence. It overrides `summarize()` only:
+`SuperLcmCompactionEngine` 继承官方 `BasicCompactionEngine`。手动压缩完整继承宿主的 `compactNow(agent, signal, sourceCommandId)`；自动路径则使用非阻塞 rolling worker。
+`SuperLcmCompactionEngine` subclasses the official `BasicCompactionEngine`. Manual compaction inherits the complete host `compactNow(agent, signal, sourceCommandId)` contract; automatic compaction uses a non-blocking rolling worker:
 
-1. Inspect the input region selected by DSH.
-2. Extract recall markers from any older checkpoint summaries inside that region.
-3. Call the official base summarizer.
-4. Generate a fresh UUID node id.
-5. Append a visible recall instruction and a hidden versioned marker containing the node id and child ids.
-6. Return the normal DSH summary result unchanged apart from the appended envelope.
-7. After DSH commits a `compaction/summary` event, index it through the `session/event` listener.
+1. Keep the leading system message and committed checkpoint prefix immutable.
+2. Snapshot a balanced raw-history span after that prefix.
+3. For detached rolling work, accept child node ids only from events whose source passes DSH `isCompactCheckpointSource`; arbitrary user-authored marker text is never trusted as a DAG edge.
+4. Summarize on the explicitly configured provider/model with an independent abort controller.
+5. Generate a fresh UUID node id and append the versioned recall envelope.
+6. Atomically write `compaction/start`, `compaction/summary`, the checkpoint replacement `user/message`, and successful `compaction/end` only if the selected span is still stable.
+7. The live listener indexes only on `compaction/end`, after correlating the complete successful lifecycle.
 
-This sequencing matters: an uncommitted or cancelled summary must not become authoritative merely because an LLM returned text.
+This sequencing matters: an incomplete, failed, cancelled, or mismatched transaction must not enter the derived index merely because an LLM returned text.
 
 ## Marker format
 
@@ -61,9 +61,10 @@ SQLite tables:
 - `lcm_nodes`: one row per `(session_id, node_id)`.
 - `lcm_edges`: ordered parent-to-child summary edges.
 - `lcm_nodes_fts`: FTS5 acceleration for summary search.
+- `lcm_index_state`: per-session `last_committed_end_seq` high-water mark for incremental replay.
 - `lcm_meta`: schema version.
 
-A node stores summary blocks, normalized text, child ids, exact source sequence ids, token accounting, provider/model metadata, and status. It does not store raw source event JSON.
+A node stores summary blocks, normalized text, child ids, exact source sequence ids, token accounting, provider/model metadata, and status. During live indexing and replay, child edges are re-derived from `shadowedSeqs` that resolve to genuine compact-checkpoint source events; child claims embedded in summary text are never authoritative. The index does not store raw source event JSON.
 
 ## Fork isolation
 
@@ -86,7 +87,7 @@ Event lookup is by the event's `seq` field, not its array position, so sparse or
 
 ## Failure containment
 
-Indexing happens only after a committed compaction event. An SQLite/indexing failure is logged and contained; it does not roll back or crash the canonical DSH session transaction. `lcm_reindex` repairs the derived state later.
+Indexing happens only after a complete successful compaction lifecycle. Replay resumes after the last indexed `compaction/end`; the cursor advances only after its node is stored. An SQLite/indexing failure is logged and contained, does not roll back the canonical DSH transaction, and leaves the cursor retryable. `lcm_reindex` can rebuild derived state; `lcm_doctor` is read-only unless called with `repair: true`.
 
 ## Security and isolation
 
@@ -96,8 +97,7 @@ All model-facing tools obtain the session from `exec.agent.session`. They reject
 
 The alpha does not yet implement:
 
-- asynchronous maintenance debt and background summary preparation;
-- multi-level rollup scheduling independent of DSH pressure compaction;
+- multi-level rollup scheduling independent of rolling pressure compaction;
 - focus briefs or task-specific context assembly;
 - embedding retrieval;
 - cross-session knowledge promotion;

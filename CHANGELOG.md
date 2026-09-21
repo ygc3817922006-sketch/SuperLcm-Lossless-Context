@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0-alpha.7 — 2026-09-21
+
+- 测试 runner 改为纯内存 ESM loader，不再创建、替换或删除项目的 `node_modules`；手动压缩完整继承宿主 `compactNow(agent, signal, sourceCommandId)` 合同。
+- 派生索引只接纳完整成功的 start/summary/checkpoint/end 生命周期，并以成功 end seq 增量推进；失败、不完整或 marker/source 不匹配的事务不会入库。
+- DAG 子边只来自 DSH 认证的 checkpoint source，阻断用户文本 marker 注入；修复共享子图层级、全量 doctor、只读 doctor 和多节点展开共享字符预算。
+- 移除无效 ratio/TTL 设置；旧配置键仍作为无操作兼容项被安全忽略，设置热更新改为一次同步切换完整运行配置，并同步更新 WebUI、示例和架构文档。
+- Replace the destructive test harness, restore the host manual-compaction contract, harden committed-lifecycle indexing and marker trust, and make diagnostics/budgets/settings match their public contracts.
+
 ## 0.3.0-alpha.6 — 2026-09-21
 
 - 缓存策略改为真正的前缀稳定：system 与已提交 checkpoint 连续冻结，后续只压其后的原文；常规摘要提前在后台准备，到上下文压力线才换入，不再猜缓存 TTL。

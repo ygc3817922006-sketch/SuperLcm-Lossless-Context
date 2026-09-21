@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 function parseJson(value, fallback) {
   if (typeof value !== 'string') return fallback
@@ -82,6 +82,10 @@ export class SuperLcmStore {
       CREATE TABLE IF NOT EXISTS lcm_meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS lcm_index_state (
+        session_id TEXT PRIMARY KEY,
+        last_committed_end_seq INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS lcm_nodes (
         session_id TEXT NOT NULL,
@@ -199,6 +203,23 @@ export class SuperLcmStore {
     return this.getNode(node.sessionId, node.nodeId)
   }
 
+  indexCursor(sessionId) {
+    this.#assertOpen()
+    const row = this.#db.prepare('SELECT last_committed_end_seq FROM lcm_index_state WHERE session_id = ?').get(sessionId)
+    return row === undefined ? -1 : Number(row.last_committed_end_seq)
+  }
+
+  setIndexCursor(sessionId, seq) {
+    this.#assertOpen()
+    if (!Number.isSafeInteger(seq)) return this.indexCursor(sessionId)
+    this.#db.prepare(`
+      INSERT INTO lcm_index_state(session_id, last_committed_end_seq) VALUES (?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET
+        last_committed_end_seq = MAX(last_committed_end_seq, excluded.last_committed_end_seq)
+    `).run(sessionId, seq)
+    return this.indexCursor(sessionId)
+  }
+
   getNode(sessionId, nodeId) {
     this.#assertOpen()
     return rowToNode(this.#db.prepare(`
@@ -219,6 +240,11 @@ export class SuperLcmStore {
           ORDER BY created_at DESC, summary_seq DESC LIMIT ?
         `).all(sessionId, status, capped)
     return rows.map(rowToNode)
+  }
+
+  listNodeIds(sessionId) {
+    this.#assertOpen()
+    return this.#db.prepare('SELECT node_id FROM lcm_nodes WHERE session_id = ? ORDER BY node_id').all(sessionId).map(row => row.node_id)
   }
 
   searchNodes(sessionId, query, { limit = 20 } = {}) {
@@ -285,6 +311,7 @@ export class SuperLcmStore {
       this.#db.prepare('DELETE FROM lcm_nodes_fts WHERE session_id = ?').run(sessionId)
       this.#db.prepare('DELETE FROM lcm_edges WHERE session_id = ?').run(sessionId)
       const result = this.#db.prepare('DELETE FROM lcm_nodes WHERE session_id = ?').run(sessionId)
+      this.#db.prepare('DELETE FROM lcm_index_state WHERE session_id = ?').run(sessionId)
       this.#db.exec('COMMIT')
       return Number(result.changes)
     } catch (error) {

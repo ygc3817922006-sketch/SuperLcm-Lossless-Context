@@ -13,8 +13,8 @@ foldBatchTokens: 64000
 softActiveTokens: 160000
 hardActiveTokens: 220000
 foldTiming: background
-summarizationProvider: openai-codex
-summarizationModel: gpt-5.6-luna
+summarizationProvider: openai
+summarizationModel: gpt-5.6-sol
 ```
 
 这些是长上下文 Worker 的起始值，不是通用常量。较小上下文模型应按比例降低门槛。

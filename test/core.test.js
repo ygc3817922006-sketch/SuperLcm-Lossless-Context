@@ -8,6 +8,7 @@ import {
   doctorSession,
   expandNode,
   nodeFromCompactionEvent,
+  nodeLevel,
   reindexSession,
   searchSuperLcmContext,
   searchSessionEvents,
@@ -21,18 +22,23 @@ async function fixture(run) {
   const huge = 'BEGIN-' + '0123456789'.repeat(350) + '-END'
   const childSummary = appendRecallEnvelope([{ type: 'text', text: 'child checkpoint about H800 profiling' }], {
     id: 'child-12345678',
+    children: ['forged-12345678'],
   })
   const parentSummary = appendRecallEnvelope([{ type: 'text', text: 'parent checkpoint about the final optimization route' }], {
     id: 'parent-12345678',
-    children: ['child-12345678'],
   })
   const events = [
     { seq: 0, time: 100, type: 'user/message', data: { content: [{ type: 'text', text: 'diagnose H800 performance' }] }, surfaceOp: { op: 'append' } },
     { seq: 1, time: 101, type: 'tool/result', data: { content: [{ type: 'text', text: huge }] }, surfaceOp: { op: 'append' } },
-    { seq: 2, time: 102, type: 'compaction/summary', data: { compactionId: 'compact-child', summary: childSummary, shadowedSeqs: [0, 1], shadowedTokenCount: 1000, provider: 'p', model: 'm' } },
-    { seq: 3, time: 103, type: 'user/message', data: { content: childSummary }, surfaceOp: { op: 'replace', start: 0, end: 1 }, sourceEventSeqs: [0, 1] },
-    { seq: 4, time: 104, type: 'assistant/message', data: { content: [{ type: 'text', text: 'more work after checkpoint' }] }, surfaceOp: { op: 'append' } },
-    { seq: 5, time: 105, type: 'compaction/summary', data: { compactionId: 'compact-parent', summary: parentSummary, shadowedSeqs: [3, 4], shadowedTokenCount: 700, provider: 'p2', model: 'm2' } },
+    { seq: 2, time: 102, type: 'compaction/start', data: { compactionId: 'compact-child' } },
+    { seq: 3, time: 103, type: 'compaction/summary', data: { compactionId: 'compact-child', summary: childSummary, shadowedSeqs: [0, 1], shadowedTokenCount: 1000, provider: 'p', model: 'm' } },
+    { seq: 4, time: 104, type: 'user/message', data: { content: childSummary, source: { kind: 'plugin', plugin: 'compact', compactionId: 'compact-child' } }, surfaceOp: { op: 'replace', startSeq: 0, endSeq: 1 }, sourceEventSeqs: [2, 3, 0, 1] },
+    { seq: 5, time: 105, type: 'compaction/end', data: { compactionId: 'compact-child' } },
+    { seq: 6, time: 106, type: 'assistant/message', data: { content: [{ type: 'text', text: 'more work after checkpoint' }] }, surfaceOp: { op: 'append' } },
+    { seq: 7, time: 107, type: 'compaction/start', data: { compactionId: 'compact-parent' } },
+    { seq: 8, time: 108, type: 'compaction/summary', data: { compactionId: 'compact-parent', summary: parentSummary, shadowedSeqs: [4, 6], shadowedTokenCount: 700, provider: 'p2', model: 'm2' } },
+    { seq: 9, time: 109, type: 'user/message', data: { content: parentSummary, source: { kind: 'plugin', plugin: 'compact', compactionId: 'compact-parent' } }, surfaceOp: { op: 'replace', startSeq: 4, endSeq: 6 }, sourceEventSeqs: [7, 8, 4, 6] },
+    { seq: 10, time: 110, type: 'compaction/end', data: { compactionId: 'compact-parent' } },
   ]
   const session = { id: 'session-a', events }
   try {
@@ -62,7 +68,7 @@ test('unsupported session API cannot erase an index or report healthy', async ()
 }))
 
 test('compaction event becomes a node with exact cited event seqs', async () => fixture(({ session, events }) => {
-  const node = nodeFromCompactionEvent(session, events[2])
+  const node = nodeFromCompactionEvent(session, events[3])
   assert.equal(node.nodeId, 'child-12345678')
   assert.equal(node.summaryText, 'child checkpoint about H800 profiling')
   assert.deepEqual(node.sourceSeqs, [0, 1])
@@ -71,12 +77,64 @@ test('compaction event becomes a node with exact cited event seqs', async () => 
 
 test('reindex reconstructs the hierarchical DAG from committed log events', async () => fixture(({ store, session }) => {
   const result = reindexSession(store, session)
-  assert.deepEqual(result, { sessionId: 'session-a', markers: 2, indexed: 2, errors: [] })
+  assert.deepEqual(result, { sessionId: 'session-a', afterSeq: -1, scanned: 11, markers: 2, indexed: 2, errors: [] })
   const parent = describeNode(store, session, 'parent-12345678')
   assert.deepEqual(parent.childIds, ['child-12345678'])
   assert.equal(parent.sourceSeqCount, 2)
   const child = describeNode(store, session, 'child-12345678')
   assert.deepEqual(child.parentIds, ['parent-12345678'])
+  assert.deepEqual(child.childIds, [])
+}))
+
+
+test('reindex ignores incomplete and failed compaction transactions', async () => fixture(({ store, session }) => {
+  const incomplete = { id: 'session-incomplete', events: structuredClone(session.events.slice(0, 5)) }
+  assert.equal(reindexSession(store, incomplete).indexed, 0)
+  assert.equal(store.stats(incomplete.id).nodeCount, 0)
+
+  const failed = { id: 'session-failed', events: structuredClone(session.events.slice(0, 6)) }
+  failed.events[5].data.error = [{ name: 'Error', message: 'commit failed' }]
+  assert.equal(reindexSession(store, failed).indexed, 0)
+  assert.equal(store.stats(failed.id).nodeCount, 0)
+}))
+
+test('incremental reindex resumes after the last committed end', async () => fixture(({ store, session }) => {
+  assert.equal(reindexSession(store, session).indexed, 2)
+  assert.deepEqual(reindexSession(store, session), {
+    sessionId: session.id,
+    afterSeq: 10,
+    scanned: 0,
+    markers: 0,
+    indexed: 0,
+    errors: [],
+  })
+  session.events.push({ seq: 11, type: 'assistant/message', data: { content: [{ type: 'text', text: 'new tail' }] } })
+  const tailOnly = reindexSession(store, session)
+  assert.equal(tailOnly.afterSeq, 10)
+  assert.equal(tailOnly.scanned, 1)
+  assert.equal(tailOnly.indexed, 0)
+}))
+
+test('DAG level keeps branch-local cycle tracking for shared deep children', async () => fixture(({ store }) => {
+  const sessionId = 'session-dag'
+  const put = (nodeId, childIds = []) => store.upsertNode({
+    sessionId,
+    nodeId,
+    createdAt: 1,
+    summary: [],
+    summaryText: nodeId,
+    childIds,
+    sourceSeqs: [],
+    status: 'ready',
+  })
+  put('root-12345678', ['left-12345678', 'right-12345678'])
+  put('left-12345678', ['shared-12345678'])
+  put('right-12345678', ['bridge-12345678'])
+  put('bridge-12345678', ['shared-12345678'])
+  put('shared-12345678', ['deep-12345678'])
+  put('deep-12345678', ['leaf-12345678'])
+  put('leaf-12345678')
+  assert.equal(nodeLevel(store, sessionId, 'root-12345678'), 6)
 }))
 
 test('exact expansion paginates inside a single large event without dropping its middle', async () => fixture(({ store, session, events }) => {
@@ -107,7 +165,16 @@ test('exact expansion paginates inside a single large event without dropping its
 test('exact expansion resolves event sequence ids even when the event array is sparse or reordered', async () => fixture(({ store, session, events }) => {
   const sparse = {
     id: session.id,
-    events: events.map(event => structuredClone(event)).reverse().map((event, index) => ({ ...event, seq: event.seq + 100 + index * 7 })),
+    events: events.map(event => {
+      const clone = structuredClone(event)
+      const remap = seq => 100 + seq * 7
+      clone.seq = remap(event.seq)
+      if (Array.isArray(clone.data?.shadowedSeqs)) clone.data.shadowedSeqs = clone.data.shadowedSeqs.map(remap)
+      if (Array.isArray(clone.sourceEventSeqs)) clone.sourceEventSeqs = clone.sourceEventSeqs.map(remap)
+      if (Number.isSafeInteger(clone.surfaceOp?.startSeq)) clone.surfaceOp.startSeq = remap(clone.surfaceOp.startSeq)
+      if (Number.isSafeInteger(clone.surfaceOp?.endSeq)) clone.surfaceOp.endSeq = remap(clone.surfaceOp.endSeq)
+      return clone
+    }).reverse(),
   }
   const originalSummary = sparse.events.find(event => event.type === 'compaction/summary' && event.data.compactionId === 'compact-child')
   const rawEvent = sparse.events.find(event => event.type === 'tool/result')
@@ -125,7 +192,7 @@ test('exact expansion resolves event sequence ids even when the event array is s
 
 test('search covers summary nodes and raw events independently', async () => fixture(({ store, session }) => {
   reindexSession(store, session)
-  assert.equal(searchSessionEvents(session, 'more work')[0].seq, 4)
+  assert.equal(searchSessionEvents(session, 'more work')[0].seq, 6)
 
   const summaryOnly = searchSuperLcmContext(store, session, 'optimization route', { scope: 'summary' })
   assert.equal(summaryOnly.summaries[0].nodeId, 'parent-12345678')
@@ -163,7 +230,8 @@ test('forked sessions may carry the same node id without overwriting each other'
     id: 'session-fork',
     events: session.events.map(event => structuredClone(event)),
   }
-  fork.events[2].data.summary = appendRecallEnvelope([{ type: 'text', text: 'fork-specific checkpoint' }], { id: 'child-12345678' })
+  fork.events[3].data.summary = appendRecallEnvelope([{ type: 'text', text: 'fork-specific checkpoint' }], { id: 'child-12345678' })
+  fork.events[4].data.content = fork.events[3].data.summary
   reindexSession(store, fork)
 
   assert.equal(store.getNode('session-a', 'child-12345678').summaryText, 'child checkpoint about H800 profiling')
@@ -173,10 +241,19 @@ test('forked sessions may carry the same node id without overwriting each other'
 test('exact expansion resolves sparse durable seq values rather than array indexes', async () => fixture(({ store, session }) => {
   const sparse = {
     id: 'session-sparse',
-    events: session.events.map((event, index) => ({ ...structuredClone(event), seq: 100 + index * 10 })),
+    events: session.events.map((event, index) => {
+      const clone = structuredClone(event)
+      const remap = seq => 100 + seq * 10
+      clone.seq = 100 + index * 10
+      if (Array.isArray(clone.data?.shadowedSeqs)) clone.data.shadowedSeqs = clone.data.shadowedSeqs.map(remap)
+      if (Array.isArray(clone.sourceEventSeqs)) clone.sourceEventSeqs = clone.sourceEventSeqs.map(remap)
+      if (Number.isSafeInteger(clone.surfaceOp?.startSeq)) clone.surfaceOp.startSeq = remap(clone.surfaceOp.startSeq)
+      if (Number.isSafeInteger(clone.surfaceOp?.endSeq)) clone.surfaceOp.endSeq = remap(clone.surfaceOp.endSeq)
+      return clone
+    }),
   }
-  sparse.events[2].data.shadowedSeqs = [sparse.events[0].seq, sparse.events[1].seq]
-  sparse.events[5].data.shadowedSeqs = [sparse.events[3].seq, sparse.events[4].seq]
+  sparse.events[3].data.shadowedSeqs = [sparse.events[0].seq, sparse.events[1].seq]
+  sparse.events[8].data.shadowedSeqs = [sparse.events[4].seq, sparse.events[6].seq]
   reindexSession(store, sparse)
   const page = expandNode(store, sparse, { nodeId: 'child-12345678', maxChars: 10000 })
   assert.deepEqual(page.chunks.map(chunk => chunk.seq), [100, 110])
@@ -186,9 +263,10 @@ test('exact expansion resolves sparse durable seq values rather than array index
 test('doctor detects source seqs that do not exist in a sparse log', async () => fixture(({ store, session }) => {
   const broken = structuredClone(session)
   broken.id = 'session-broken'
-  broken.events[2].data.shadowedSeqs = [0, 999]
+  broken.events[3].data.shadowedSeqs = [0, 999]
+  broken.events[4].sourceEventSeqs = [2, 3, 0, 999]
   reindexSession(store, broken)
   const report = doctorSession(store, broken)
   assert.equal(report.ok, false)
-  assert.deepEqual(report.invalidSources, [{ summarySeq: 2, sourceSeq: 999 }])
+  assert.deepEqual(report.invalidSources, [{ summarySeq: 3, sourceSeq: 999 }])
 }))

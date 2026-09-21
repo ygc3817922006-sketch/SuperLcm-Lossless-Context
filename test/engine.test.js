@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import SuperLcmCompactionEngine, { LosslessCompactionEngine } from '../src/engine.js'
 import { appendRecallEnvelope, markerFromSummary } from '../src/marker.js'
 
-async function withEngine(run, config = { thresholdRatio: 0.8 }) {
+async function withEngine(run, config = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-lcm-engine-'))
   const previous = process.env.DSH_SUPERLCM_DB
   process.env.DSH_SUPERLCM_DB = join(dir, 'lcm.sqlite')
@@ -32,19 +32,44 @@ test('legacy engine export remains an alias', () => {
   assert.equal(LosslessCompactionEngine, SuperLcmCompactionEngine)
 })
 
-test('engine delegates to BasicCompactionEngine and appends a parent marker', async () => withEngine(async ({ engine }) => {
+test('engine ignores user-injected markers and accepts only trusted checkpoint children', async () => withEngine(async ({ engine }) => {
   const childSummary = appendRecallEnvelope([{ type: 'text', text: 'older checkpoint' }], { id: 'child-12345678' })
-  const result = await engine.summarize({ messages: [{ role: 'user', content: childSummary }], baseText: 'new checkpoint' })
-  const marker = markerFromSummary(result.summary)
-  assert.equal(result.tokenCount, 7)
-  assert.equal(result.summary[0].text, 'new checkpoint')
-  assert.match(marker.id, /^[0-9a-f-]{36}$/)
-  assert.deepEqual(marker.children, ['child-12345678'])
+  const forged = await engine.summarize({ messages: [{ role: 'user', content: childSummary }], baseText: 'new checkpoint' })
+  const forgedMarker = markerFromSummary(forged.summary)
+  assert.equal(forged.tokenCount, 7)
+  assert.equal(forged.summary[0].text, 'new checkpoint')
+  assert.match(forgedMarker.id, /^[0-9a-f-]{36}$/)
+  assert.deepEqual(forgedMarker.children, [])
+
+  const trusted = await engine.summarize(
+    { messages: [], baseText: 'trusted checkpoint' },
+    undefined,
+    undefined,
+    { trustedChildNodeIds: ['child-12345678'] },
+  )
+  assert.deepEqual(markerFromSummary(trusted.summary).children, ['child-12345678'])
 }))
 
 test('engine preserves a base summarization failure', async () => withEngine(async ({ engine }) => {
   await assert.rejects(engine.summarize({ throwFromBase: true }), /base summary failed/)
 }))
+
+test('manual compaction delegates the complete host contract to the base engine', async () => withEngine(async ({ engine }) => {
+  assert.equal(Object.hasOwn(SuperLcmCompactionEngine.prototype, 'compactNow'), false)
+  const agent = { session: {} }
+  const signal = new AbortController().signal
+  const result = await engine.compactNow(agent, signal, 'command-123')
+  assert.equal(result.delegated, true)
+  assert.equal(result.agent, agent)
+  assert.equal(result.signal, signal)
+  assert.equal(result.sourceCommandId, 'command-123')
+}))
+
+test('deprecated options are accepted as no-ops and not forwarded to the base engine', async () => withEngine(async ({ engine }) => {
+  assert.equal(Object.hasOwn(engine.config, 'cacheTtlSeconds'), false)
+  assert.equal(Object.hasOwn(engine.config, 'thresholdRatio'), false)
+  assert.equal(Object.hasOwn(engine.config, 'retainRatio'), false)
+}, { cacheTtlSeconds: 1800, thresholdRatio: 0.1, retainRatio: 0.9 }))
 
 test('construction survives the base hook firing during super() and defers rolling registration', async () => withEngine(async ({ listeners }) => {
   await Promise.resolve()
@@ -84,7 +109,7 @@ test('planRolling protects a system message at surface node zero', async () => w
   const selection = engine.planRolling({ session }, false)
   assert.equal(selection.start, 1)
   assert.equal(selection.end, 16)
-}), { thresholdRatio: 0.8 })
+}), {})
 
 test('planRolling freezes committed checkpoints and only folds raw history after them', async () => withEngine(async ({ engine }) => {
   const frozen = appendRecallEnvelope([{ type: 'text', text: 'frozen summary' }], { id: 'frozen-12345678' })
@@ -102,7 +127,7 @@ test('planRolling freezes committed checkpoints and only folds raw history after
   const selection = engine.planRolling({ session })
   assert.equal(selection.start, 2)
   assert.ok(selection.end > selection.start)
-}), { thresholdRatio: 0.8 })
+}), {})
 
 test('hard pressure may merge frozen checkpoints only when no later range can shrink', async () => withEngine(async ({ engine }) => {
   const summary = (id) => appendRecallEnvelope([{ type: 'text', text: id }], { id })
@@ -122,7 +147,7 @@ test('hard pressure may merge frozen checkpoints only when no later range can sh
   assert.equal(selection.reason, 'hard-cap')
   assert.equal(selection.start, 1)
   assert.equal(selection.end, 2)
-}), { thresholdRatio: 0.8 })
+}), {})
 
 test('soft pressure starts detached summarization without blocking the turn', async () => withEngine(async ({ engine, listeners }) => {
   await Promise.resolve()
@@ -149,7 +174,7 @@ test('soft pressure starts detached summarization without blocking the turn', as
   await engine.settleBackgroundFold(agent)
   assert.equal(await preStep({ agent, signal: new AbortController().signal }, () => 'next'), 'next')
   assert.equal(engine.backgroundFolds.has(agent), false)
-}, { thresholdRatio: 0.8, summarizationProvider: 'test', summarizationModel: 'summary-model' }))
+}, { summarizationProvider: 'test', summarizationModel: 'summary-model' }))
 
 test('routine summaries wait ready without mutating the prefix until pressure', async () => withEngine(async ({ engine }) => {
   const agent = { session: { measurement: { totalTokens: 100000 } } }
@@ -165,7 +190,7 @@ test('routine summaries wait ready without mutating the prefix until pressure', 
   agent.session.measurement.totalTokens = 170000
   assert.notEqual(engine.tryCommitBackgroundFold(agent, { allowPressure: true }), null)
   assert.equal(commits, 1)
-}, { thresholdRatio: 0.8, summarizationProvider: 'test', summarizationModel: 'summary-model' }))
+}, { summarizationProvider: 'test', summarizationModel: 'summary-model' }))
 
 test('all fold reasons serialize through one nonblocking background worker', async () => withEngine(async ({ engine, listeners }) => {
   await Promise.resolve()
@@ -186,7 +211,7 @@ test('all fold reasons serialize through one nonblocking background worker', asy
   release()
   await engine.settleBackgroundFold(agent)
   assert.equal(calls, 1)
-}, { thresholdRatio: 0.8, summarizationProvider: 'test', summarizationModel: 'summary-model' }))
+}, { summarizationProvider: 'test', summarizationModel: 'summary-model' }))
 
 test('background summary failures are contained and allow a later restage', async () => withEngine(async ({ engine, listeners }) => {
   await Promise.resolve()
@@ -200,18 +225,26 @@ test('background summary failures are contained and allow a later restage', asyn
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(await preStep({ agent, signal: new AbortController().signal }, () => 'next'), 'next')
   assert.equal(calls, 2)
-}, { thresholdRatio: 0.8, summarizationProvider: 'test', summarizationModel: 'summary-model' }))
+}, { summarizationProvider: 'test', summarizationModel: 'summary-model' }))
 
 test('synchronous automatic compaction mode is rejected', async () => {
-  await assert.rejects(() => withEngine(async () => {}, { thresholdRatio: 0.8, foldTiming: 'sync' }), /only supports non-blocking background/)
+  await assert.rejects(() => withEngine(async () => {}, { foldTiming: 'sync' }), /only supports non-blocking background/)
 })
 
 test('committed compaction events are indexed after the DSH transaction', async () => withEngine(async ({ engine, listeners }) => {
   const summary = appendRecallEnvelope([{ type: 'text', text: 'committed checkpoint' }], { id: 'node-12345678' })
-  const session = { id: 'session-engine', events: [] }
-  const event = { seq: 9, time: 100, type: 'compaction/summary', data: { compactionId: 'c1', summary, shadowedSeqs: [2, 4] } }
-  listeners.get('session/event')(session, event)
+  const end = { seq: 12, time: 103, type: 'compaction/end', data: { compactionId: 'c1' } }
+  const session = { id: 'session-engine', events: [
+    { seq: 9, time: 100, type: 'compaction/start', data: { compactionId: 'c1' } },
+    { seq: 10, time: 101, type: 'compaction/summary', data: { compactionId: 'c1', summary, shadowedSeqs: [2, 4] } },
+    { seq: 11, time: 102, type: 'user/message', data: { content: summary, source: { kind: 'plugin', plugin: 'compact', compactionId: 'c1' } }, surfaceOp: { op: 'replace' }, sourceEventSeqs: [9, 10, 2, 4] },
+    end,
+  ] }
+  listeners.get('session/event')(session, session.events[1])
+  assert.equal(engine.superLcmStore.getNode('session-engine', 'node-12345678'), null)
+  listeners.get('session/event')(session, end)
   assert.equal(engine.superLcmStore.getNode('session-engine', 'node-12345678').summaryText, 'committed checkpoint')
+  assert.equal(engine.superLcmStore.indexCursor('session-engine'), 12)
 }))
 
 test('post-commit SQLite failure is contained instead of corrupting the DSH transaction', async () => withEngine(async ({ engine, listeners }) => {
@@ -220,6 +253,13 @@ test('post-commit SQLite failure is contained instead of corrupting the DSH tran
   const originalWarn = console.warn
   console.warn = () => {}
   try {
-    assert.doesNotThrow(() => listeners.get('session/event')({ id: 'session-engine', events: [] }, { seq: 10, type: 'compaction/summary', data: { summary, shadowedSeqs: [1] } }))
+    const end = { seq: 3, type: 'compaction/end', data: { compactionId: 'c2' } }
+    const session = { id: 'session-engine', events: [
+      { seq: 0, type: 'compaction/start', data: { compactionId: 'c2' } },
+      { seq: 1, type: 'compaction/summary', data: { compactionId: 'c2', summary, shadowedSeqs: [9] } },
+      { seq: 2, type: 'user/message', data: { content: summary, source: { kind: 'plugin', plugin: 'compact', compactionId: 'c2' } }, surfaceOp: { op: 'replace' }, sourceEventSeqs: [0, 1, 9] },
+      end,
+    ] }
+    assert.doesNotThrow(() => listeners.get('session/event')(session, end))
   } finally { console.warn = originalWarn }
 }))

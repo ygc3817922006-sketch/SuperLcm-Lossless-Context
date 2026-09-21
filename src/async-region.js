@@ -3,10 +3,12 @@ import { isDeepStrictEqual } from 'node:util'
 import {
   CompactionId,
   compactCheckpointSource,
+  isCompactCheckpointSource,
   toolPairingBalancedAfter,
   toolPairingBalancedBefore,
 } from '@deepseek-ai/dsh-compaction'
 import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
+import { extractChildNodeIds } from './marker.js'
 
 const SUMMARY_OPEN_TAG = '<compacted-summary>'
 const SUMMARY_CLOSE_TAG = '</compacted-summary>'
@@ -109,6 +111,11 @@ export function prepareAsyncRegion(engine, agent, selection) {
   const measurement = engine.ctx.tokenMeter.measure(session)
   const selectedNodes = structuredClone(measurement.nodes.slice(startIdx, endIdx + 1))
   const shadowedSeqs = [...surfaceNodes.slice(startIdx, endIdx + 1)]
+  const trustedChildNodeIds = [...new Set(shadowedSeqs.flatMap((seq) => {
+    const event = session.eventAt(seq)
+    if (event?.type !== 'user/message' || !isCompactCheckpointSource(event.data?.source)) return []
+    return extractChildNodeIds(event.data?.content)
+  }))]
   if (selectedNodes.length !== shadowedSeqs.length || selectedNodes.some((node, index) => node.seq !== shadowedSeqs[index])) {
     throw new AsyncSurfaceChangedError('token-meter surface does not match the selected compaction span')
   }
@@ -118,6 +125,7 @@ export function prepareAsyncRegion(engine, agent, selection) {
     endIdx,
     selectedNodes,
     shadowedSeqs,
+    trustedChildNodeIds,
     shadowedTokenCount: selectedNodes.reduce((total, node) => total + (node.heuristicTokens ?? node.tokens ?? 0), 0),
     shadowedRouteTokenCount: selectedNodes.reduce((total, node) => total + (node.tokens ?? 0), 0),
     input: structuredClone(buildSummarizationInput(session, shadowedSeqs)),
@@ -127,7 +135,9 @@ export function prepareAsyncRegion(engine, agent, selection) {
 export async function summarizeAsyncRegion(engine, agent, prepared, signal) {
   signal?.throwIfAborted()
   const compactionId = CompactionId(randomUUID())
-  const summaryResult = await engine.summarize(prepared.input, agent, signal)
+  const summaryResult = await engine.summarize(prepared.input, agent, signal, {
+    trustedChildNodeIds: prepared.trustedChildNodeIds,
+  })
   signal?.throwIfAborted()
   if (summaryResult === null || typeof summaryResult !== 'object' || !Array.isArray(summaryResult.summary)) {
     throw new TypeError('summarizer returned an invalid summary result')

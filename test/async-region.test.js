@@ -6,6 +6,7 @@ import {
   prepareAsyncRegion,
   summarizeAsyncRegion,
 } from '../src/async-region.js'
+import { appendRecallEnvelope } from '../src/marker.js'
 
 function fakeSession() {
   const events = [
@@ -52,7 +53,8 @@ function fakeEngine(session) {
         estimateMessage() { return 20 },
       },
     },
-    async summarize() {
+    async summarize(_input, _agent, _signal, metadata) {
+      this.lastMetadata = metadata
       return {
         summary: [{ type: 'text', text: 'prepared summary' }],
         provider: 'summary-provider',
@@ -64,6 +66,25 @@ function fakeEngine(session) {
     },
   }
 }
+
+
+test('only checkpoint-source events contribute trusted DAG children', async () => {
+  const session = fakeSession()
+  const child = appendRecallEnvelope([{ type: 'text', text: 'child' }], { id: 'child-12345678' })
+  session.events[1].data.content = child
+  session.events[2].type = 'user/message'
+  session.events[2].data = {
+    role: 'user',
+    content: child,
+    source: { kind: 'plugin', plugin: 'compact', compactionId: 'trusted-compaction' },
+  }
+  const engine = fakeEngine(session)
+  const agent = { session }
+  const prepared = prepareAsyncRegion(engine, agent, { start: 1, end: 2, reason: 'hard-pressure' })
+  assert.deepEqual(prepared.trustedChildNodeIds, ['child-12345678'])
+  await summarizeAsyncRegion(engine, agent, prepared, new AbortController().signal)
+  assert.deepEqual(engine.lastMetadata, { trustedChildNodeIds: ['child-12345678'] })
+})
 
 test('staged summary commits atomically after unrelated tail growth', async () => {
   const session = fakeSession()

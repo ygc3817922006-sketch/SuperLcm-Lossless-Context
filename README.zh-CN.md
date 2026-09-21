@@ -4,7 +4,7 @@
 
 它把 **DSH 只追加的 Session Event Log（会话事件日志）作为唯一原文真源**。每次压缩摘要都会获得稳定的召回节点 ID；SQLite 只保存摘要 DAG（有向无环图）、父子关系和精确的源事件序号。模型以后可以搜索、描述和展开旧上下文，而不是把摘要冒充成原文。
 
-> 当前版本：`0.3.0-alpha.6`。rolling（滚动）压缩会冻结前缀；压缩摘要模型现在可以独立指定，并可在 WebUI 的插件设置页热更新。原始历史仍由 DSH Event Log 无损保留。
+> 当前版本：`0.3.0-alpha.7`。rolling（滚动）压缩会冻结前缀；压缩摘要模型现在可以独立指定，并可在 WebUI 的插件设置页热更新。原始历史仍由 DSH Event Log 无损保留。
 
 ## 已实现
 
@@ -13,7 +13,7 @@
 - 为摘要加入稳定、机器可读的召回标记并形成分层摘要 DAG。
 - 使用 `(session_id, node_id)` 复合身份，父会话和 fork（分叉）子会话不会互相覆盖。
 - 按事件序号精确追回原始事件；单个超大事件也可连续分页，不丢中段。
-- SQLite 损坏或删除后，可从 DSH 会话事件日志重新建索引。
+- 只增量索引完整成功的压缩事务；SQLite 损坏或删除后，可从 DSH 会话事件日志显式重建。
 - 提供 `lcm_grep`、`lcm_describe`、`lcm_expand`、`lcm_expand_query`、`lcm_reindex`、`lcm_doctor` 六个召回与修复工具。
 
 ## 压缩模型
@@ -51,7 +51,7 @@ SuperLcm 只支持一种自动策略：`mode: "rolling"`、`foldTiming: "backgro
 摘要节点 → 精确 source event seq → DSH 原始事件
 ```
 
-SQLite 是可重建的派生索引，不是第二套会话真源。删掉 SQLite 会失去索引，但不会删掉 DSH 原文；运行 `lcm_reindex` 可以恢复。
+SQLite 是可重建的派生索引，不是第二套会话真源。删掉 SQLite 会失去索引，但不会删掉 DSH 原文；运行 `lcm_reindex` 可以从完整成功的压缩事务恢复。`lcm_doctor` 默认只读，只有显式传入 `repair: true` 才重建。
 
 ## 安装与启用
 

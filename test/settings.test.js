@@ -41,8 +41,6 @@ async function withSettingsEngine(run) {
   }
 
   const engine = new SuperLcmCompactionEngine(ctx, {
-    thresholdRatio: 0.6,
-    retainRatio: 0.16,
     summarizationProvider: '',
     summarizationModel: '',
   })
@@ -81,6 +79,8 @@ test('atomic dedicated summarizer route applies live and blank changes are ignor
   const dedicated = {
     ...getSource(),
     summarizationRoute: { provider: '  openai  ', model: '  gpt-5.6-sol  ' },
+    tailCount: 31,
+    minRetainTokens: 36000,
   }
   installed.options.validate(dedicated)
   setSource(dedicated)
@@ -88,6 +88,8 @@ test('atomic dedicated summarizer route applies live and blank changes are ignor
 
   assert.equal(engine.config.summarizationProvider, 'openai')
   assert.equal(engine.config.summarizationModel, 'gpt-5.6-sol')
+  assert.equal(engine.rollingConfig.tailCount, 31)
+  assert.equal(engine.rollingConfig.minRetainTokens, 36000)
 
   const switched = {
     ...getSource(),

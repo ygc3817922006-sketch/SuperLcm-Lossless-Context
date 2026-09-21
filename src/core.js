@@ -1,3 +1,4 @@
+import { isCompactCheckpointSource } from '@deepseek-ai/dsh-compaction'
 import { contentBlocksToText, extractMarkers, markerFromSummary, stripRecallMetadata } from './marker.js'
 
 function clampInteger(value, fallback, min, max) {
@@ -47,6 +48,83 @@ function snippetAround(text, query, width = 360) {
   return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`
 }
 
+function compactionIdOf(event) {
+  const value = event?.data?.compactionId
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function committedCompactionRecords(events) {
+  const active = new Map()
+  const committed = []
+  const ordered = [...events].sort((left, right) => (left?.seq ?? 0) - (right?.seq ?? 0))
+  for (const event of ordered) {
+    const id = compactionIdOf(event)
+    if (event?.type === 'compaction/start' && id !== null) {
+      active.set(id, { start: event, summary: null, checkpoint: null })
+      continue
+    }
+    if (event?.type === 'compaction/summary' && id !== null) {
+      const state = active.get(id)
+      if (state !== undefined && state.summary === null) state.summary = event
+      continue
+    }
+    if (event?.type === 'user/message' && isCompactCheckpointSource(event.data?.source)) {
+      const checkpointId = typeof event.data.source.compactionId === 'string' ? event.data.source.compactionId : null
+      const state = checkpointId === null ? undefined : active.get(checkpointId)
+      const checkpointMarker = markerFromSummary(event.data?.content)
+      const summaryMarker = markerFromSummary(state?.summary?.data?.summary)
+      const shadowedSeqs = state?.summary?.data?.shadowedSeqs
+      const shadowedRange = state?.summary?.data?.shadowedRange
+      if (state !== undefined
+        && state.summary !== null
+        && event.surfaceOp?.op === 'replace'
+        && checkpointMarker !== null
+        && summaryMarker !== null
+        && checkpointMarker.id === summaryMarker.id
+        && Array.isArray(shadowedSeqs)
+        && shadowedSeqs.every(Number.isSafeInteger)
+        && Array.isArray(event.sourceEventSeqs)
+        && event.sourceEventSeqs.includes(state.start.seq)
+        && event.sourceEventSeqs.includes(state.summary.seq)
+        && shadowedSeqs.every(seq => event.sourceEventSeqs.includes(seq))
+        && (shadowedRange === undefined
+          || (event.surfaceOp.startSeq === shadowedRange.start && event.surfaceOp.endSeq === shadowedRange.end))) {
+        state.checkpoint = event
+      }
+      continue
+    }
+    if (event?.type === 'compaction/end' && id !== null) {
+      const state = active.get(id)
+      if (state !== undefined
+        && event.data?.error === undefined
+        && state.summary !== null
+        && state.checkpoint !== null) {
+        committed.push({ ...state, end: event })
+      }
+      active.delete(id)
+    }
+  }
+  return committed
+}
+
+export function committedCompactionSummary(session, endEvent) {
+  if (endEvent?.type !== 'compaction/end') return null
+  const endSeq = endEvent.seq
+  const record = committedCompactionRecords(sessionEvents(session))
+    .find(candidate => candidate.end.seq === endSeq)
+  return record?.summary ?? null
+}
+
+function trustedCheckpointNodeIds(session, sourceSeqs) {
+  const eventsBySeq = eventMapOf(sessionEvents(session))
+  return [...new Set(sourceSeqs.flatMap((seq) => {
+    const source = eventsBySeq.get(seq)
+    if (source?.type !== 'user/message' || !isCompactCheckpointSource(source.data?.source)) return []
+    const marker = markerFromSummary(source.data?.content)
+    return marker === null ? [] : [marker.id]
+  }))]
+}
+
 export function nodeFromCompactionEvent(session, event) {
   if (event?.type !== 'compaction/summary') return null
   const marker = markerFromSummary(event.data?.summary)
@@ -62,7 +140,7 @@ export function nodeFromCompactionEvent(session, event) {
     createdAt: Number.isFinite(event.time) ? event.time : Date.now(),
     summary: event.data?.summary ?? [],
     summaryText: stripRecallMetadata(contentBlocksToText(event.data?.summary ?? [])),
-    childIds: marker.children,
+    childIds: trustedCheckpointNodeIds(session, sourceSeqs),
     sourceSeqs,
     shadowedTokenCount: Number.isFinite(event.data?.shadowedTokenCount)
       ? event.data.shadowedTokenCount
@@ -83,22 +161,23 @@ export function reindexSession(store, session, { rebuild = false } = {}) {
   const sessionId = sessionIdOf(session)
   const events = sessionEvents(session)
   if (rebuild) store.deleteSession(sessionId)
+  const afterSeq = rebuild ? -1 : store.indexCursor(sessionId)
+  const pendingEvents = events.filter(event => Number.isSafeInteger(event?.seq) && event.seq > afterSeq)
   let markers = 0
   let indexed = 0
   const errors = []
-  for (const event of events) {
-    if (event?.type !== 'compaction/summary') continue
-    const marker = markerFromSummary(event.data?.summary)
-    if (marker === null) continue
+  for (const { summary: event, end } of committedCompactionRecords(pendingEvents)) {
     markers += 1
     try {
       indexCompactionEvent(store, session, event)
+      store.setIndexCursor(sessionId, end.seq)
       indexed += 1
     } catch (error) {
       errors.push({ seq: event.seq, error: error instanceof Error ? error.message : String(error) })
+      break
     }
   }
-  return { sessionId, markers, indexed, errors }
+  return { sessionId, afterSeq, scanned: pendingEvents.length, markers, indexed, errors }
 }
 
 export function searchSessionEvents(session, query, { limit = 20 } = {}) {
@@ -135,13 +214,17 @@ function requireNode(store, sessionId, nodeId) {
  * 对损坏的索引保持环安全 / Corruption-safe for damaged indexes.
  */
 export function nodeLevel(store, sessionId, nodeId) {
-  const seen = new Set()
+  const visiting = new Set()
+  const memo = new Map()
   const levelOf = (id) => {
-    if (seen.has(id)) return 1
-    seen.add(id)
+    if (memo.has(id)) return memo.get(id)
+    if (visiting.has(id)) return 1
+    visiting.add(id)
     const children = store.childrenOf(sessionId, id)
-    if (children.length === 0) return 1
-    return 1 + Math.max(...children.map(levelOf))
+    const level = children.length === 0 ? 1 : 1 + Math.max(...children.map(levelOf))
+    visiting.delete(id)
+    memo.set(id, level)
+    return level
   }
   return levelOf(nodeId)
 }
@@ -209,7 +292,7 @@ export function expandNode(store, session, {
   const node = requireNode(store, sessionId, nodeId)
   const offset = clampInteger(sourceOffset, 0, 0, Math.max(0, node.sourceSeqs.length))
   const charOffset = clampInteger(eventCharOffset, 0, 0, Number.MAX_SAFE_INTEGER)
-  const budget = clampInteger(maxChars, 30000, 1000, 100000)
+  const budget = clampInteger(maxChars, 30000, 1, 100000)
   const depth = clampInteger(recursiveDepth, 0, 0, 8)
   const events = sessionEvents(session)
   const eventsBySeq = eventMapOf(events)
@@ -298,8 +381,7 @@ export function doctorSession(store, session) {
   const invalidSources = []
   const events = sessionEvents(session)
   const eventSeqs = new Set(events.map(event => event?.seq).filter(Number.isSafeInteger))
-  for (const event of events) {
-    if (event?.type !== 'compaction/summary') continue
+  for (const { summary: event } of committedCompactionRecords(events)) {
     const marker = markerFromSummary(event.data?.summary)
     if (marker === null) continue
     markers.push({ seq: event.seq, id: marker.id })
@@ -313,7 +395,7 @@ export function doctorSession(store, session) {
     }
   }
   const stats = store.stats(sessionId)
-  const storedIds = new Set(store.listNodes(sessionId, { limit: 5000 }).map(node => node.nodeId))
+  const storedIds = new Set(store.listNodeIds(sessionId))
   const missingInDb = [...markerIds].filter(id => !storedIds.has(id))
   const staleInDb = [...storedIds].filter(id => !markerIds.has(id))
   const quickCheck = store.quickCheck()

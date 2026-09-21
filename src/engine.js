@@ -3,7 +3,7 @@ import z from '@deepseek-ai/schemastery'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 import { CONTEXT_WINDOW_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import { isCompactCheckpointSource, toolPairingBalancedBefore } from '@deepseek-ai/dsh-compaction'
-import { indexCompactionEvent } from './core.js'
+import { committedCompactionSummary, indexCompactionEvent } from './core.js'
 import { appendRecallEnvelope, extractChildNodeIds } from './marker.js'
 import { selectRollingRange } from './rolling.js'
 import { SuperLcmStore, resolveDatabasePath } from './store.js'
@@ -14,6 +14,8 @@ import {
   summarizeAsyncRegion,
 } from './async-region.js'
 
+const DEPRECATED_CONFIG_KEYS = new Set(['cacheTtlSeconds', 'thresholdRatio', 'retainRatio'])
+
 const ROLLING_CONFIG_KEYS = new Set([
   'mode',
   'tailCount',
@@ -22,7 +24,6 @@ const ROLLING_CONFIG_KEYS = new Set([
   'foldBatchTokens',
   'softActiveTokens',
   'hardActiveTokens',
-  'cacheTtlSeconds',
   'foldTiming',
 ])
 
@@ -107,24 +108,14 @@ const SETTINGS_SCHEMA = z.object({
   softActiveTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.softActiveTokens),
   hardActiveTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.hardActiveTokens),
   foldTiming: z.const('background').default(ROLLING_DEFAULTS.foldTiming),
-  thresholdRatio: z.percent().default(0.6),
-  retainRatio: z.percent().default(0.16),
 })
 
 function splitConfig(config) {
   const base = {}
   for (const [key, value] of Object.entries(config ?? {})) {
-    if (!ROLLING_CONFIG_KEYS.has(key)) base[key] = value
+    if (!ROLLING_CONFIG_KEYS.has(key) && !DEPRECATED_CONFIG_KEYS.has(key)) base[key] = value
   }
   return { base, rolling: normalizeRolling(config) }
-}
-
-function compactedInputOf(input) {
-  if (input === null || typeof input !== 'object') return input
-  return input.messages
-    ?? input.shadowedMessages
-    ?? input.history
-    ?? input
 }
 
 function systemPrefixEndIndex(session) {
@@ -173,9 +164,13 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
     })
 
     ctx.on('session/event', (session, event) => {
-      if (event?.type !== 'compaction/summary') return
+      if (event?.type !== 'compaction/end') return
       try {
-        indexCompactionEvent(this.superLcmStore, session, event)
+        const summaryEvent = committedCompactionSummary(session, event)
+        if (summaryEvent !== null) {
+          const node = indexCompactionEvent(this.superLcmStore, session, summaryEvent)
+          this.superLcmStore.setIndexCursor(node.sessionId, event.seq)
+        }
       } catch (error) {
         reportIndexFailure(error)
       }
@@ -197,8 +192,6 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
       softActiveTokens: this.rollingConfig.softActiveTokens,
       hardActiveTokens: this.rollingConfig.hardActiveTokens,
       foldTiming: this.rollingConfig.foldTiming,
-      thresholdRatio: this.config?.thresholdRatio ?? 0.6,
-      retainRatio: this.config?.retainRatio ?? 0.16,
     }
     let source = () => entry
     try {
@@ -208,9 +201,6 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
             const route = cleanRoute(value.summarizationRoute)
             if (!routeIsComplete(route) || route.provider.length === 0) {
               throw new Error('background compaction requires an explicit summarization provider and model')
-            }
-            if (value.retainRatio >= value.thresholdRatio) {
-              throw new Error(`retainRatio (${value.retainRatio}) must be less than thresholdRatio (${value.thresholdRatio})`)
             }
             if (value.pressureFoldTokens > value.foldBatchTokens) {
               throw new Error(`pressureFoldTokens (${value.pressureFoldTokens}) must not exceed foldBatchTokens (${value.foldBatchTokens})`)
@@ -227,7 +217,7 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
             const route = cleanRoute(value.summarizationRoute)
             if (!routeIsComplete(route) || route.provider.length === 0) return
 
-            this.rollingConfig = normalizeRolling({
+            const nextRollingConfig = normalizeRolling({
               ...this.rollingConfig,
               tailCount: value.tailCount,
               minRetainTokens: value.minRetainTokens,
@@ -237,17 +227,12 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
               hardActiveTokens: value.hardActiveTokens,
               foldTiming: value.foldTiming,
             })
-            const thresholdRatio = value.thresholdRatio
-            const retainRatio = value.retainRatio
-            if (retainRatio >= thresholdRatio) return
             const nextConfig = {
               ...this.config,
               summarizationProvider: route.provider,
               summarizationModel: route.model,
-              thresholdRatio,
-              retainRatio,
             }
-            delete nextConfig.retainTokens
+            this.rollingConfig = nextRollingConfig
             this.config = nextConfig
           },
         })
@@ -259,9 +244,11 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
   }
 
   async summarize(...args) {
-    const input = args[0]
-    const children = extractChildNodeIds(compactedInputOf(input))
-    const result = await super.summarize(...args)
+    const metadata = args[3]
+    const children = Array.isArray(metadata?.trustedChildNodeIds)
+      ? [...new Set(metadata.trustedChildNodeIds)]
+      : []
+    const result = await super.summarize(...args.slice(0, 3))
     if (result === null || typeof result !== 'object' || !Array.isArray(result.summary)) {
       throw new TypeError('BasicCompactionEngine.summarize() returned an invalid summary result')
     }
@@ -473,10 +460,6 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
     return null
   }
 
-  async compactNow(agent, signal) {
-    if (signal?.aborted) return null
-    return this.rollingMaintain(agent, signal)
-  }
 }
 
 // 兼容旧版 SuperLcm、SuperLCM 与 dsh-lossless-context <= 0.2.x 的导出 / Compatibility exports for older SuperLcm, SuperLCM, and dsh-lossless-context <= 0.2.x.

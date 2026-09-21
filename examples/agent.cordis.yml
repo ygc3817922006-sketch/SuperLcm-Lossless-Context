@@ -12,11 +12,17 @@
     - id: SuperLcm-compaction
       name: SuperLcm
       config:
-        # 这些选项会转发给 BasicCompactionEngine。
-        # These options are forwarded to BasicCompactionEngine.
-        auto: true
-        thresholdRatio: 0.80
-        retainRatio: 0.16
+        # 后台摘要必须使用明确的独立模型路由。
+        # Background summaries require an explicit dedicated model route.
+        summarizationProvider: openai
+        summarizationModel: gpt-5.6-sol
+        foldTiming: background
+        tailCount: 24
+        minRetainTokens: 32000
+        pressureFoldTokens: 20000
+        foldBatchTokens: 64000
+        softActiveTokens: 160000
+        hardActiveTokens: 220000
 
     - id: command-compact
       name: '@deepseek-ai/dsh-command-compact'

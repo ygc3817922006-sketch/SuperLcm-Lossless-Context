@@ -16,14 +16,10 @@
       disabled: true
       config:
         mode: rolling
-        # 两项都留空时跟随当前 Agent 路由。
-        # Leave both blank to summarize with the current Agent route.
-        # 两项同时填写即可使用独立压缩模型，例如：
-        # Set both to use a dedicated compaction model, for example:
-        # summarizationProvider: openai
-        # summarizationModel: gpt-5.6-sol
-        summarizationProvider: ""
-        summarizationModel: ""
+        # 后台压缩必须明确指定独立路由，绝不回退到当前 Agent。
+        # Background compaction requires an explicit dedicated route and never falls back.
+        summarizationProvider: openai
+        summarizationModel: gpt-5.6-sol
         tailCount: 24
         minRetainTokens: 32000
         pressureFoldTokens: 20000
@@ -31,10 +27,6 @@
         softActiveTokens: 160000
         hardActiveTokens: 220000
         foldTiming: background
-        # 紧急/提供方溢出策略继承 DSH 基础压缩。
-        # Emergency / provider-overflow policy inherited from DSH basic compaction.
-        thresholdRatio: 0.60
-        retainRatio: 0.16
 
 # 开发期间保持禁用；启用前确认 ctx.compaction 只剩一个提供方。
 # 开发期间保持禁用；将 disabled 改为 false 前确认只剩一个 ctx.compaction 提供方。

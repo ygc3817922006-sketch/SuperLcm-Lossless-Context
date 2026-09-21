@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 import { SuperLcmStore, resolveDatabasePath } from '../src/store.js'
 
 async function withStore(run) {
@@ -50,6 +51,29 @@ test('resolveDatabasePath selects the new home and preserves legacy fallback', a
     assert.equal(resolveDatabasePath({ DSH_HOME: home }), join(home, 'lossless-context', 'lcm.sqlite'))
   } finally {
     await rm(home, { recursive: true, force: true })
+  }
+})
+
+
+test('schema v1 upgrades cursor state without losing existing nodes', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-lcm-migrate-'))
+  const databasePath = join(dir, 'lcm.sqlite')
+  let store = new SuperLcmStore(databasePath)
+  try {
+    store.upsertNode(node())
+    store.close()
+    const legacy = new DatabaseSync(databasePath)
+    legacy.exec('DROP TABLE lcm_index_state')
+    legacy.prepare("UPDATE lcm_meta SET value = '1' WHERE key = 'schema_version'").run()
+    legacy.close()
+
+    store = new SuperLcmStore(databasePath)
+    assert.equal(store.getNode('session-a', 'node-12345678').summaryText, '训练系统关键结论：保留原始事件。')
+    assert.equal(store.indexCursor('session-a'), -1)
+    assert.equal(store.setIndexCursor('session-a', 42), 42)
+  } finally {
+    store.close()
+    await rm(dir, { recursive: true, force: true })
   }
 })
 

@@ -4,7 +4,7 @@ A DSH-native SuperLcm lossless-recall context layer inspired by Lossless Claw / 
 
 It keeps **DeepSeek Harness's append-only session log as the only raw-history source of truth**. Compaction summaries receive stable recall node identifiers; a derived SQLite index records the summary DAG and exact source event sequence numbers. The model can later search, inspect, and expand old context without pretending that a summary is the original text.
 
-> Status: `0.3.0-alpha.6`. Rolling compaction preserves an immutable leading prefix, and the summarization provider/model can now be selected independently and changed live from the WebUI plugin settings. Exact raw recall remains backed by the DSH event log.
+> Status: `0.3.0-alpha.7`. Rolling compaction preserves an immutable leading prefix, and the summarization provider/model can now be selected independently and changed live from the WebUI plugin settings. Exact raw recall remains backed by the DSH event log.
 
 中文说明：[README.zh-CN.md](./README.zh-CN.md)
 
@@ -16,7 +16,7 @@ It keeps **DeepSeek Harness's append-only session log as the only raw-history so
 - Builds a per-session hierarchical summary DAG from markers found in the compacted span.
 - Keeps forked sessions isolated with the composite identity `(session_id, node_id)`.
 - Recovers exact raw events by sequence number, including lossless pagination inside a single very large event.
-- Rebuilds the entire derived SQLite index from the canonical session log.
+- Incrementally indexes only complete successful compaction lifecycles; an explicit rebuild reconstructs SQLite from the canonical session log.
 - Exposes six model-facing recall and repair tools: `lcm_grep`, `lcm_describe`, `lcm_expand`, `lcm_expand_query`, `lcm_reindex`, and `lcm_doctor`.
 
 ## Summarizer model
@@ -48,7 +48,7 @@ This plugin does not replace gbrain or another long-term knowledge system. Its r
 
 “Lossless” means the raw DSH events remain available and summaries carry exact recovery pointers. It does **not** mean a summary itself contains every detail, nor does it eliminate model error during summarization.
 
-SQLite is a derived index, not a second transcript database. Deleting it loses search acceleration and DAG metadata only; `lcm_reindex` can reconstruct it from committed summary events in the DSH log.
+SQLite is a derived index, not a second transcript database. Deleting it loses search acceleration and DAG metadata only; `lcm_reindex` can reconstruct it from complete successful compaction transactions in the DSH log. `lcm_doctor` is read-only unless `repair: true` is explicit.
 
 ## Requirements
 
