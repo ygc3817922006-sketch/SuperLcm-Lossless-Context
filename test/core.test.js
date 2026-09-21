@@ -98,7 +98,7 @@ test('reindex ignores incomplete and failed compaction transactions', async () =
   assert.equal(store.stats(failed.id).nodeCount, 0)
 }))
 
-test('incremental reindex resumes after the last committed end', async () => fixture(({ store, session }) => {
+test('incremental reindex advances across ordinary tail events', async () => fixture(({ store, session }) => {
   assert.equal(reindexSession(store, session).indexed, 2)
   assert.deepEqual(reindexSession(store, session), {
     sessionId: session.id,
@@ -113,6 +113,22 @@ test('incremental reindex resumes after the last committed end', async () => fix
   assert.equal(tailOnly.afterSeq, 10)
   assert.equal(tailOnly.scanned, 1)
   assert.equal(tailOnly.indexed, 0)
+  assert.equal(store.indexCursor(session.id), 11)
+  assert.equal(reindexSession(store, session).scanned, 0)
+}))
+
+test('scan cursor holds before an incomplete transaction and indexes it when the end arrives', async () => fixture(({ store, session }) => {
+  const staged = { id: 'session-staged', events: structuredClone(session.events.slice(0, 5)) }
+  const first = reindexSession(store, staged)
+  assert.equal(first.indexed, 0)
+  assert.equal(store.indexCursor(staged.id), 1)
+
+  staged.events.push(structuredClone(session.events[5]))
+  const completed = reindexSession(store, staged)
+  assert.equal(completed.afterSeq, 1)
+  assert.equal(completed.indexed, 1)
+  assert.equal(store.indexCursor(staged.id), 5)
+  assert.equal(store.getNode(staged.id, 'child-12345678').summaryText, 'child checkpoint about H800 profiling')
 }))
 
 test('DAG level keeps branch-local cycle tracking for shared deep children', async () => fixture(({ store }) => {

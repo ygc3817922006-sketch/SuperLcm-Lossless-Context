@@ -61,7 +61,8 @@ SQLite tables:
 - `lcm_nodes`: one row per `(session_id, node_id)`.
 - `lcm_edges`: ordered parent-to-child summary edges.
 - `lcm_nodes_fts`: FTS5 acceleration for summary search.
-- `lcm_index_state`: per-session `last_committed_end_seq` high-water mark for incremental replay.
+- `lcm_scan_state`: per-session `last_scanned_seq` high-water mark. Ordinary tail events advance it, while an unfinished compaction keeps it immediately before that transaction.
+- `lcm_index_state`: legacy alpha.7 cursor retained only as the schema-v2 migration source.
 - `lcm_meta`: schema version.
 
 A node stores summary blocks, normalized text, child ids, exact source sequence ids, token accounting, provider/model metadata, and status. During live indexing and replay, child edges are re-derived from `shadowedSeqs` that resolve to genuine compact-checkpoint source events; child claims embedded in summary text are never authoritative. The index does not store raw source event JSON.
@@ -87,7 +88,7 @@ Event lookup is by the event's `seq` field, not its array position, so sparse or
 
 ## Failure containment
 
-Indexing happens only after a complete successful compaction lifecycle. Replay resumes after the last indexed `compaction/end`; the cursor advances only after its node is stored. An SQLite/indexing failure is logged and contained, does not roll back the canonical DSH transaction, and leaves the cursor retryable. `lcm_reindex` can rebuild derived state; `lcm_doctor` is read-only unless called with `repair: true`.
+Indexing happens only after a complete successful compaction lifecycle. Replay resumes after the last safely scanned event, including ordinary tail events. An unfinished transaction holds the cursor before its `compaction/start`, and an indexing failure holds it before the failed `compaction/end`, so later calls can reconstruct and retry the lifecycle from the canonical log. SQLite/indexing failure is logged and contained and does not roll back the canonical DSH transaction. `lcm_reindex` can rebuild derived state; `lcm_doctor` is read-only unless called with `repair: true`.
 
 ## Security and isolation
 

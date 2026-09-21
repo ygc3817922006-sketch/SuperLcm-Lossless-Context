@@ -18,7 +18,7 @@ The current suite verifies:
 - human summary text does not contain marker metadata;
 - only complete successful start/summary/checkpoint/end lifecycles become reconstructable nodes;
 - incomplete, failed, and mismatched lifecycles are ignored;
-- incremental replay resumes from the last committed end;
+- incremental replay advances through ordinary tail events without skipping a lifecycle that completes across calls;
 - parent/child summary DAG reconstruction accepts children only from trusted checkpoint-source events;
 - exact source sequence preservation;
 - expansion through a single very large event without middle truncation;
@@ -48,7 +48,7 @@ Automated contract tests are necessary but not sufficient. Before enabling the c
 Replace, rather than append, the existing compaction provider with `SuperLcm`.
 6. Generate enough harmless context to trigger one real DSH compaction.
 7. Inspect the full committed lifecycle (`start`, marker-bearing `summary`, checkpoint replacement, successful `end`).
-8. Run `lcm_reindex` and confirm one node is indexed; rerun it and confirm zero events are rescanned past the recorded end cursor.
+8. Run `lcm_reindex` and confirm one node is indexed; append ordinary events, rerun twice, and confirm the second rerun scans zero events past the recorded scan cursor.
 9. Use `lcm_grep` to find a phrase that existed only before compaction.
 10. Use `lcm_expand` until `next` is null and byte-compare the recovered serialized event with the canonical session event.
 11. Trigger a second compaction that contains the first checkpoint and confirm a parent-to-child edge appears.
@@ -72,5 +72,5 @@ Do not enable the plugin in the primary profile if any of these occur:
 
 ## Current certificate boundary
 
-`0.3.0-alpha.7` has an automated source-level certificate; the profile certificate remains the real runtime gate.
-`0.3.0-alpha.7` 有源码级自动测试证书；profile 证书仍以真实运行时验收为准。 A real DSH desktop/profile Agent-loop certificate must be produced on the target installation and pinned to its DSH version and profile manifest.
+`0.3.0-alpha.8` has an automated source-level certificate; the profile certificate remains the real runtime gate.
+`0.3.0-alpha.8` 有源码级自动测试证书；profile 证书仍以真实运行时验收为准。 A real DSH desktop/profile Agent-loop certificate must be produced on the target installation and pinned to its DSH version and profile manifest.

@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'SuperLcm')
-  assert.equal(pkg.version, '0.3.0-alpha.7')
+  assert.equal(pkg.version, '0.3.0-alpha.8')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -46,6 +46,8 @@ test('web settings expose an atomic catalog-backed summarizer route and rolling 
   assert.doesNotMatch(client, /cacheTtlSeconds/)
   assert.doesNotMatch(client, /thresholdRatio/)
   assert.doesNotMatch(client, /retainRatio/)
+  assert.match(client, /scope\.mutate\(ops, before\.revision\)/)
+  assert.doesNotMatch(client, /await scope\.set\(field\.key/)
   assert.match(client, /plugins\.bundle\.config/)
   assert.match(client, /key:\s*"SuperLcm"/)
   assert.match(client, /SETTINGS_NAMESPACE = "superlcm"/)

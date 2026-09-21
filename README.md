@@ -4,7 +4,7 @@ A DSH-native SuperLcm lossless-recall context layer inspired by Lossless Claw / 
 
 It keeps **DeepSeek Harness's append-only session log as the only raw-history source of truth**. Compaction summaries receive stable recall node identifiers; a derived SQLite index records the summary DAG and exact source event sequence numbers. The model can later search, inspect, and expand old context without pretending that a summary is the original text.
 
-> Status: `0.3.0-alpha.7`. Rolling compaction preserves an immutable leading prefix, and the summarization provider/model can now be selected independently and changed live from the WebUI plugin settings. Exact raw recall remains backed by the DSH event log.
+> Status: `0.3.0-alpha.8`. Rolling compaction preserves an immutable leading prefix, and the summarization provider/model can now be selected independently and changed live from the WebUI plugin settings. Exact raw recall remains backed by the DSH event log.
 
 中文说明：[README.zh-CN.md](./README.zh-CN.md)
 

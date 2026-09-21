@@ -1,6 +1,6 @@
 {
   "name": "SuperLcm",
-  "version": "0.3.0-alpha.7",
+  "version": "0.3.0-alpha.8",
   "description": "SuperLcm hierarchical context compaction and exact recall for DeepSeek Harness, backed by the durable DSH session log.",
   "type": "module",
   "main": "./src/engine.js",

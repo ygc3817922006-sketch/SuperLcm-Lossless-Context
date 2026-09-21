@@ -55,7 +55,7 @@ test('resolveDatabasePath selects the new home and preserves legacy fallback', a
 })
 
 
-test('schema v1 upgrades cursor state without losing existing nodes', async () => {
+test('schema v2 migrates the committed-end cursor into scan state without losing nodes', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-lcm-migrate-'))
   const databasePath = join(dir, 'lcm.sqlite')
   let store = new SuperLcmStore(databasePath)
@@ -63,17 +63,28 @@ test('schema v1 upgrades cursor state without losing existing nodes', async () =
     store.upsertNode(node())
     store.close()
     const legacy = new DatabaseSync(databasePath)
-    legacy.exec('DROP TABLE lcm_index_state')
-    legacy.prepare("UPDATE lcm_meta SET value = '1' WHERE key = 'schema_version'").run()
+    legacy.exec("DROP TABLE lcm_scan_state; INSERT INTO lcm_index_state(session_id, last_committed_end_seq) VALUES ('session-a', 42);")
+    legacy.prepare("UPDATE lcm_meta SET value = '2' WHERE key = 'schema_version'").run()
     legacy.close()
 
     store = new SuperLcmStore(databasePath)
     assert.equal(store.getNode('session-a', 'node-12345678').summaryText, '训练系统关键结论：保留原始事件。')
-    assert.equal(store.indexCursor('session-a'), -1)
-    assert.equal(store.setIndexCursor('session-a', 42), 42)
+    assert.equal(store.indexCursor('session-a'), 42)
+    assert.equal(store.setIndexCursor('session-a', 41), 42)
   } finally {
     store.close()
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('literal :memory: opens SQLite memory storage instead of a repository file', () => {
+  const store = new SuperLcmStore(':memory:')
+  try {
+    assert.equal(store.path, ':memory:')
+    store.upsertNode(node())
+    assert.equal(store.getNode('session-a', 'node-12345678').summaryText, '训练系统关键结论：保留原始事件。')
+  } finally {
+    store.close()
   }
 })
 

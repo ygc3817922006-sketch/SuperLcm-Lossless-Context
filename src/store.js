@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 function parseJson(value, fallback) {
   if (typeof value !== 'string') return fallback
@@ -66,8 +66,8 @@ export class SuperLcmStore {
   #closed = false
 
   constructor(path = resolveDatabasePath()) {
-    this.path = resolve(path)
-    mkdirSync(dirname(this.path), { recursive: true })
+    this.path = path === ':memory:' ? path : resolve(path)
+    if (this.path !== ':memory:') mkdirSync(dirname(this.path), { recursive: true })
     this.#db = new DatabaseSync(this.path)
     this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
     this.#migrate()
@@ -86,6 +86,10 @@ export class SuperLcmStore {
       CREATE TABLE IF NOT EXISTS lcm_index_state (
         session_id TEXT PRIMARY KEY,
         last_committed_end_seq INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS lcm_scan_state (
+        session_id TEXT PRIMARY KEY,
+        last_scanned_seq INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS lcm_nodes (
         session_id TEXT NOT NULL,
@@ -127,6 +131,10 @@ export class SuperLcmStore {
         summary_text,
         tokenize = 'unicode61 remove_diacritics 2'
       );
+    `)
+    this.#db.exec(`
+      INSERT OR IGNORE INTO lcm_scan_state(session_id, last_scanned_seq)
+      SELECT session_id, last_committed_end_seq FROM lcm_index_state;
     `)
     this.#db.prepare(`
       INSERT INTO lcm_meta(key, value) VALUES ('schema_version', ?)
@@ -205,17 +213,17 @@ export class SuperLcmStore {
 
   indexCursor(sessionId) {
     this.#assertOpen()
-    const row = this.#db.prepare('SELECT last_committed_end_seq FROM lcm_index_state WHERE session_id = ?').get(sessionId)
-    return row === undefined ? -1 : Number(row.last_committed_end_seq)
+    const row = this.#db.prepare('SELECT last_scanned_seq FROM lcm_scan_state WHERE session_id = ?').get(sessionId)
+    return row === undefined ? -1 : Number(row.last_scanned_seq)
   }
 
   setIndexCursor(sessionId, seq) {
     this.#assertOpen()
     if (!Number.isSafeInteger(seq)) return this.indexCursor(sessionId)
     this.#db.prepare(`
-      INSERT INTO lcm_index_state(session_id, last_committed_end_seq) VALUES (?, ?)
+      INSERT INTO lcm_scan_state(session_id, last_scanned_seq) VALUES (?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
-        last_committed_end_seq = MAX(last_committed_end_seq, excluded.last_committed_end_seq)
+        last_scanned_seq = MAX(last_scanned_seq, excluded.last_scanned_seq)
     `).run(sessionId, seq)
     return this.indexCursor(sessionId)
   }
@@ -312,6 +320,7 @@ export class SuperLcmStore {
       this.#db.prepare('DELETE FROM lcm_edges WHERE session_id = ?').run(sessionId)
       const result = this.#db.prepare('DELETE FROM lcm_nodes WHERE session_id = ?').run(sessionId)
       this.#db.prepare('DELETE FROM lcm_index_state WHERE session_id = ?').run(sessionId)
+      this.#db.prepare('DELETE FROM lcm_scan_state WHERE session_id = ?').run(sessionId)
       this.#db.exec('COMMIT')
       return Number(result.changes)
     } catch (error) {

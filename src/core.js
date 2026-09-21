@@ -107,6 +107,24 @@ function committedCompactionRecords(events) {
   return committed
 }
 
+function scanHighWater(events, afterSeq) {
+  const ordered = events
+    .filter(event => Number.isSafeInteger(event?.seq) && event.seq > afterSeq)
+    .sort((left, right) => left.seq - right.seq)
+  if (ordered.length === 0) return afterSeq
+
+  const openStarts = new Map()
+  for (const event of ordered) {
+    const id = compactionIdOf(event)
+    if (event.type === 'compaction/start' && id !== null) openStarts.set(id, event.seq)
+    if (event.type === 'compaction/end' && id !== null) openStarts.delete(id)
+  }
+  if (openStarts.size === 0) return ordered.at(-1).seq
+
+  const firstOpenStart = Math.min(...openStarts.values())
+  return ordered.reduce((cursor, event) => event.seq < firstOpenStart ? event.seq : cursor, afterSeq)
+}
+
 export function committedCompactionSummary(session, endEvent) {
   if (endEvent?.type !== 'compaction/end') return null
   const endSeq = endEvent.seq
@@ -163,20 +181,31 @@ export function reindexSession(store, session, { rebuild = false } = {}) {
   if (rebuild) store.deleteSession(sessionId)
   const afterSeq = rebuild ? -1 : store.indexCursor(sessionId)
   const pendingEvents = events.filter(event => Number.isSafeInteger(event?.seq) && event.seq > afterSeq)
+  const hasNewEnd = pendingEvents.some(event => event.type === 'compaction/end')
+  const committed = hasNewEnd
+    ? committedCompactionRecords(events).filter(record => record.end.seq > afterSeq)
+    : []
   let markers = 0
   let indexed = 0
+  let failedEndSeq = null
   const errors = []
-  for (const { summary: event, end } of committedCompactionRecords(pendingEvents)) {
+  for (const { summary: event, end } of committed) {
     markers += 1
     try {
       indexCompactionEvent(store, session, event)
-      store.setIndexCursor(sessionId, end.seq)
       indexed += 1
     } catch (error) {
+      failedEndSeq = end.seq
       errors.push({ seq: event.seq, error: error instanceof Error ? error.message : String(error) })
       break
     }
   }
+
+  let cursor = scanHighWater(pendingEvents, afterSeq)
+  if (failedEndSeq !== null) {
+    cursor = pendingEvents.reduce((safe, event) => event.seq < failedEndSeq && event.seq <= cursor ? Math.max(safe, event.seq) : safe, afterSeq)
+  }
+  if (cursor > afterSeq) store.setIndexCursor(sessionId, cursor)
   return { sessionId, afterSeq, scanned: pendingEvents.length, markers, indexed, errors }
 }
 

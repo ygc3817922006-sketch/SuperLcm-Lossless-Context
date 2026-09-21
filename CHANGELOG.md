@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0-alpha.8 — 2026-09-21
+
+- 高级 rolling 参数改为一次 `scope.mutate()` 原子提交，关联字段不再因逐项校验而产生假失败或部分落盘。
+- 派生索引新增普通事件扫描高水位；无新压缩时不再反复扫描相同尾部，同时为未完成事务和索引失败保留安全重试边界。
+- `:memory:` 现在真正使用 SQLite 内存库，不再在仓库根目录生成持久文件；同步 schema-v2 游标迁移、文档和部署锁文件。
+
 ## 0.3.0-alpha.7 — 2026-09-21
 
 - 测试 runner 改为纯内存 ESM loader，不再创建、替换或删除项目的 `node_modules`；手动压缩完整继承宿主 `compactNow(agent, signal, sourceCommandId)` 合同。
