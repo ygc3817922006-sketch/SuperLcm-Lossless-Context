@@ -82,7 +82,7 @@ function routeIsComplete(route) {
   return (route.provider.length === 0) === (route.model.length === 0)
 }
 
-const SETTINGS_NAMESPACE = 'SuperLcm'
+const SETTINGS_NAMESPACE = 'superlcm'
 const SUMMARIZATION_ROUTE_SCHEMA = z.object({
   provider: z.string().default(''),
   model: z.string().default(''),

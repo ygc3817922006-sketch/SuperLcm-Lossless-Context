@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0-alpha.2 — 2026-09-21
+
+- 修复 WebUI 设置命名空间使用大写名称导致设置服务不可用的问题；显示名称仍为 `SuperLcm`，内部键改为 `superlcm`。
+- Fixed the WebUI settings namespace: the display name remains `SuperLcm`, while the settings key is now the valid lowercase `superlcm`.
+- 升级补丁版本以避免本地压缩包缓存复用旧内容。/ Bumped the patch version to avoid reusing stale local tarball contents.
+
 ## 0.3.0-alpha.1 — 2026-09-21
 
 - 将包名和 WebUI 配置界面统一改名为 SuperLcm。/ Rename the package and WebUI configuration surface to SuperLcm.

@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'SuperLcm')
-  assert.equal(pkg.version, '0.3.0-alpha.1')
+  assert.equal(pkg.version, '0.3.0-alpha.2')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -45,7 +45,9 @@ test('web settings expose an atomic catalog-backed summarizer route and current 
   assert.match(client, /hardActiveTokens:\s*220000/)
   assert.match(client, /plugins\.bundle\.config/)
   assert.match(client, /key:\s*"SuperLcm"/)
+  assert.match(client, /SETTINGS_NAMESPACE = "superlcm"/)
   assert.doesNotMatch(client, /settings\.plugin\.item/)
+  assert.doesNotMatch(client, /SETTINGS_NAMESPACE = "SuperLcm"/)
 })
 
 test('default bundle is safe: tools are mounted but no second compaction provider is auto-mounted', async () => {

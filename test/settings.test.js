@@ -63,7 +63,7 @@ async function withSettingsEngine(run) {
 }
 
 test('summarizer route defaults to follow-agent and requires an atomic complete pair', async () => withSettingsEngine(async ({ installed, getSource }) => {
-  assert.equal(installed.namespace, 'SuperLcm')
+  assert.equal(installed.namespace, 'superlcm')
   assert.deepEqual(installed.entry.summarizationRoute, { provider: '', model: '' })
 
   assert.throws(() => installed.options.validate({

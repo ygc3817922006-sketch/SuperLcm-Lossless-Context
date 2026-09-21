@@ -68,5 +68,5 @@ Do not enable the plugin in the primary profile if any of these occur:
 
 ## Current certificate boundary
 
-`0.3.0-alpha.1` currently has an automated source-level test certificate; the profile certificate is the real runtime gate.
-`0.3.0-alpha.1` 当前只有源码级自动测试证书；profile 证书仍以真实运行时验收为准。 A real DSH desktop/profile Agent-loop certificate must be produced on the target installation and pinned to its DSH version and profile manifest.
+`0.3.0-alpha.2` currently has an automated source-level test certificate; the profile certificate is the real runtime gate.
+`0.3.0-alpha.2` 当前只有源码级自动测试证书；profile 证书仍以真实运行时验收为准。 A real DSH desktop/profile Agent-loop certificate must be produced on the target installation and pinned to its DSH version and profile manifest.
