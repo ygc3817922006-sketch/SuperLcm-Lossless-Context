@@ -215,6 +215,9 @@ name: SuperLcm
 mode: rolling
 summarizationProvider: openai
 summarizationModel: gpt-5.6-sol
+# Optional: retry once after primary failure; never use the main Agent.
+fallbackSummarizationProvider: anthropic
+fallbackSummarizationModel: claude-sonnet-4-5
 tailCount: 24
 minRetainTokens: 32000
 pressureFoldTokens: 20000
@@ -223,6 +226,8 @@ softActiveTokens: 160000
 hardActiveTokens: 220000
 foldTiming: background
 ```
+
+The backup route is optional. When configured, its provider/model pair must be complete and different from the primary. It is tried exactly once only after primary failure and only while the task is not cancelled. If both fail, SuperLcm preserves both errors and never uses the main Agent model.
 
 See [CACHE_POLICY.md](./docs/CACHE_POLICY.md) for policy details and [VALIDATION.md](./docs/VALIDATION.md) for the real-profile gate.
 

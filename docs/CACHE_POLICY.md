@@ -15,11 +15,14 @@ hardActiveTokens: 220000
 foldTiming: background
 summarizationProvider: openai
 summarizationModel: gpt-5.6-sol
+# 可选备用路由 / Optional backup route
+fallbackSummarizationProvider: anthropic
+fallbackSummarizationModel: claude-sonnet-4-5
 ```
 
 这些是长上下文 Worker 的起始值，不是通用常量。较小上下文模型应按比例降低门槛。
 
-自动压缩必须显式配置独立 provider/model。缺少其中任何一项时，SuperLcm 会记录警告并拒绝启动压缩，不会回退到当前 Agent 或 custom-subagent 路由。
+自动压缩必须显式配置独立的主 provider/model。备用 provider/model 可留空；配置时必须成对填写，且不能与主路由相同。主路由失败后，SuperLcm 仅在任务未取消时用备用路由重试一次；备用也失败时报告两次错误并停止。整个过程都不会回退到当前 Agent 或 custom-subagent 路由。
 
 ## 选区规则
 
@@ -41,7 +44,7 @@ summarizationModel: gpt-5.6-sol
 ## 后台事务
 
 1. **Stage**：同步读取当前 surface、消息、token-meter 节点和工具配对边界，生成稳定快照。该步骤不调用模型。
-2. **Summarize**：后台使用插件配置的专用路由生成摘要。任务拥有独立 `AbortController`，当前 turn 的取消不会取消它。
+2. **Summarize**：后台先使用插件配置的主专用路由生成摘要；主路由失败时可用显式备用路由重试一次。每次调用固定自己的路由快照，不修改共享 engine config。任务拥有独立 `AbortController`，当前 turn 的取消不会取消它；一旦该后台任务自身被取消，就不会启动备用请求。
 3. **Commit**：常规 ready 批次等到 soft/hard pressure 才提交，overflow 可强制提交；不再猜测 provider 的缓存过期时间。只有原选区序列、对应 token 节点、replace generation 与工具配对仍一致时才提交；尾部新增消息不影响提交。
 4. **Restage**：选区已变时丢弃摘要，不写任何压缩事件，稍后重新选区。
 

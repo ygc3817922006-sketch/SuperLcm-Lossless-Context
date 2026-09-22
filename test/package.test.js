@@ -35,9 +35,11 @@ test('package exports the backend and all stable library leaves', async () => {
 test('web settings expose an atomic catalog-backed summarizer route and rolling defaults', async () => {
   const client = await text('lib/client.js')
   assert.match(client, /summarizationRoute/)
+  assert.match(client, /fallbackSummarizationRoute/)
+  assert.match(client, /fallbackSummarizerHeading/)
   assert.match(client, /remote\.session\.modelCatalog\(\)/)
   assert.match(client, /const inject = \[[^\]]*"remote\.session"[^\]]*\]/)
-  assert.match(client, /scope\.set\("summarizationRoute", desired\)/)
+  assert.match(client, /scope\.set\(field, desired\)/)
   assert.doesNotMatch(client, /scope\.set\("summarizationProvider"/)
   assert.doesNotMatch(client, /scope\.set\("summarizationModel"/)
   assert.match(client, /foldBatchTokens:\s*64000/)

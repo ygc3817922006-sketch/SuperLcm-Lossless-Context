@@ -50,9 +50,106 @@ test('engine ignores user-injected markers and accepts only trusted checkpoint c
   assert.deepEqual(markerFromSummary(trusted.summary).children, ['child-12345678'])
 }))
 
-test('engine preserves a base summarization failure', async () => withEngine(async ({ engine }) => {
+test('engine preserves a base summarization failure when no backup is configured', async () => withEngine(async ({ engine }) => {
   await assert.rejects(engine.summarize({ throwFromBase: true }), /base summary failed/)
 }))
+
+test('successful primary summarization never calls the configured backup', async () => withEngine(async ({ engine }) => {
+  const routeAttempts = []
+  const result = await engine.summarize({ baseText: 'primary checkpoint', routeAttempts })
+  assert.deepEqual(routeAttempts, [{ provider: 'primary', model: 'primary-model' }])
+  assert.equal(result.provider, 'primary')
+  assert.equal(result.model, 'primary-model')
+}, {
+  summarizationProvider: 'primary',
+  summarizationModel: 'primary-model',
+  fallbackSummarizationProvider: 'backup',
+  fallbackSummarizationModel: 'backup-model',
+}))
+
+test('summarization retries once through the configured backup route', async () => withEngine(async ({ engine }) => {
+  const routeAttempts = []
+  const result = await engine.summarize({
+    baseText: 'backup checkpoint',
+    failProviders: ['primary'],
+    routeAttempts,
+  })
+  assert.deepEqual(routeAttempts, [
+    { provider: 'primary', model: 'primary-model' },
+    { provider: 'backup', model: 'backup-model' },
+  ])
+  assert.equal(result.provider, 'backup')
+  assert.equal(result.model, 'backup-model')
+  assert.equal(engine.config.summarizationProvider, 'primary')
+  assert.equal(engine.config.summarizationModel, 'primary-model')
+}, {
+  summarizationProvider: 'primary',
+  summarizationModel: 'primary-model',
+  fallbackSummarizationProvider: 'backup',
+  fallbackSummarizationModel: 'backup-model',
+}))
+
+test('summarization reports both failures without retrying beyond the backup', async () => withEngine(async ({ engine }) => {
+  const routeAttempts = []
+  await assert.rejects(
+    engine.summarize({ failProviders: ['primary', 'backup'], routeAttempts }),
+    (error) => {
+      assert.ok(error instanceof AggregateError)
+      assert.equal(error.errors.length, 2)
+      assert.match(error.message, /primary and fallback summarization routes failed/)
+      return true
+    },
+  )
+  assert.equal(routeAttempts.length, 2)
+}, {
+  summarizationProvider: 'primary',
+  summarizationModel: 'primary-model',
+  fallbackSummarizationProvider: 'backup',
+  fallbackSummarizationModel: 'backup-model',
+}))
+
+test('aborted summarization does not start the backup route', async () => withEngine(async ({ engine }) => {
+  const routeAttempts = []
+  const controller = new AbortController()
+  controller.abort(new Error('turn cancelled'))
+  await assert.rejects(
+    engine.summarize({ failProviders: ['primary'], routeAttempts }, {}, controller.signal),
+    /base summary failed/,
+  )
+  assert.deepEqual(routeAttempts, [{ provider: 'primary', model: 'primary-model' }])
+}, {
+  summarizationProvider: 'primary',
+  summarizationModel: 'primary-model',
+  fallbackSummarizationProvider: 'backup',
+  fallbackSummarizationModel: 'backup-model',
+}))
+
+test('backup route requires a complete distinct primary route', async () => {
+  await assert.rejects(
+    () => withEngine(async () => {}, {
+      summarizationProvider: 'primary',
+      summarizationModel: 'primary-model',
+      fallbackSummarizationProvider: 'backup',
+    }),
+    /must be set together/,
+  )
+  await assert.rejects(
+    () => withEngine(async () => {}, {
+      fallbackSummarizationProvider: 'backup',
+      fallbackSummarizationModel: 'backup-model',
+    }),
+    /requires an explicit primary route/,
+  )
+  await assert.rejects(
+    () => withEngine(async () => {}, {
+      summarizationProvider: 'same',
+      summarizationModel: 'model',
+      fallbackSummarizationProvider: 'same',
+      fallbackSummarizationModel: 'model',
+    }),
+    /must differ from the primary route/,
+  )
+})
 
 test('manual compaction delegates the complete host contract to the base engine', async () => withEngine(async ({ engine }) => {
   assert.equal(Object.hasOwn(SuperLcmCompactionEngine.prototype, 'compactNow'), false)

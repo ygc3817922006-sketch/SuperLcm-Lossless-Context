@@ -9,8 +9,11 @@ export class BasicCompactionEngine {
     if (typeof this._registerAutomaticCompaction === 'function') this._registerAutomaticCompaction()
   }
   async summarize(input) {
-    if (input?.throwFromBase) throw new Error('base summary failed')
-    return { summary: [{ type: 'text', text: input?.baseText ?? 'base checkpoint' }], tokenCount: 7 }
+    const provider = this.config?.summarizationProvider ?? ''
+    const model = this.config?.summarizationModel ?? ''
+    if (Array.isArray(input?.routeAttempts)) input.routeAttempts.push({ provider, model })
+    if (input?.throwFromBase || input?.failProviders?.includes(provider)) throw new Error('base summary failed for ' + provider + '/' + model)
+    return { summary: [{ type: 'text', text: input?.baseText ?? 'base checkpoint' }], tokenCount: 7, provider, model }
   }
   compactNow(agent, signal, sourceCommandId) {
     return Promise.resolve({ agent, signal, sourceCommandId, delegated: true })

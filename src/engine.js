@@ -15,6 +15,7 @@ import {
 } from './async-region.js'
 
 const DEPRECATED_CONFIG_KEYS = new Set(['cacheTtlSeconds', 'thresholdRatio', 'retainRatio'])
+const FALLBACK_CONFIG_KEYS = new Set(['fallbackSummarizationProvider', 'fallbackSummarizationModel'])
 
 const ROLLING_CONFIG_KEYS = new Set([
   'mode',
@@ -93,6 +94,14 @@ function routeIsComplete(route) {
   return (route.provider.length === 0) === (route.model.length === 0)
 }
 
+function routeIsConfigured(route) {
+  return route.provider.length > 0 && route.model.length > 0
+}
+
+function routesEqual(left, right) {
+  return left.provider === right.provider && left.model === right.model
+}
+
 const SETTINGS_NAMESPACE = 'superlcm'
 const SUMMARIZATION_ROUTE_SCHEMA = z.object({
   provider: z.string().default(''),
@@ -101,6 +110,7 @@ const SUMMARIZATION_ROUTE_SCHEMA = z.object({
 
 const SETTINGS_SCHEMA = z.object({
   summarizationRoute: SUMMARIZATION_ROUTE_SCHEMA,
+  fallbackSummarizationRoute: SUMMARIZATION_ROUTE_SCHEMA,
   tailCount: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.tailCount),
   minRetainTokens: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.minRetainTokens),
   pressureFoldTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.pressureFoldTokens),
@@ -111,11 +121,30 @@ const SETTINGS_SCHEMA = z.object({
 })
 
 function splitConfig(config) {
-  const base = {}
-  for (const [key, value] of Object.entries(config ?? {})) {
-    if (!ROLLING_CONFIG_KEYS.has(key) && !DEPRECATED_CONFIG_KEYS.has(key)) base[key] = value
+  const raw = config ?? {}
+  const primaryRoute = cleanRoute({
+    provider: raw.summarizationProvider,
+    model: raw.summarizationModel,
+  })
+  const fallbackRoute = cleanRoute({
+    provider: raw.fallbackSummarizationProvider,
+    model: raw.fallbackSummarizationModel,
+  })
+  if (!routeIsComplete(fallbackRoute)) {
+    throw new Error('fallbackSummarizationProvider and fallbackSummarizationModel must be set together')
   }
-  return { base, rolling: normalizeRolling(config) }
+  if (routeIsConfigured(fallbackRoute) && !routeIsConfigured(primaryRoute)) {
+    throw new Error('fallback summarization route requires an explicit primary route')
+  }
+  if (routeIsConfigured(fallbackRoute) && routesEqual(primaryRoute, fallbackRoute)) {
+    throw new Error('fallback summarization route must differ from the primary route')
+  }
+
+  const base = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (!ROLLING_CONFIG_KEYS.has(key) && !DEPRECATED_CONFIG_KEYS.has(key) && !FALLBACK_CONFIG_KEYS.has(key)) base[key] = value
+  }
+  return { base, rolling: normalizeRolling(raw), fallbackRoute }
 }
 
 function systemPrefixEndIndex(session) {
@@ -147,9 +176,10 @@ function reportIndexFailure(error) {
 
 export class SuperLcmCompactionEngine extends BasicCompactionEngine {
   constructor(ctx, config = {}) {
-    const { base, rolling } = splitConfig(config)
+    const { base, rolling, fallbackRoute } = splitConfig(config)
     super(ctx, base)
     this.rollingConfig = rolling
+    this.fallbackSummarizationRoute = fallbackRoute
     this.superLcmStore = new SuperLcmStore(resolveDatabasePath())
     this.backgroundFolds = new WeakMap()
     this.backgroundControllers = new Set()
@@ -185,6 +215,7 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
         provider: this.config?.summarizationProvider,
         model: this.config?.summarizationModel,
       }),
+      fallbackSummarizationRoute: cleanRoute(this.fallbackSummarizationRoute),
       tailCount: this.rollingConfig.tailCount,
       minRetainTokens: this.rollingConfig.minRetainTokens,
       pressureFoldTokens: this.rollingConfig.pressureFoldTokens,
@@ -199,8 +230,15 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
         settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, SETTINGS_SCHEMA, entry, {
           validate: (value) => {
             const route = cleanRoute(value.summarizationRoute)
-            if (!routeIsComplete(route) || route.provider.length === 0) {
+            const fallbackRoute = cleanRoute(value.fallbackSummarizationRoute)
+            if (!routeIsComplete(route) || !routeIsConfigured(route)) {
               throw new Error('background compaction requires an explicit summarization provider and model')
+            }
+            if (!routeIsComplete(fallbackRoute)) {
+              throw new Error('fallback summarization provider and model must be set together')
+            }
+            if (routeIsConfigured(fallbackRoute) && routesEqual(route, fallbackRoute)) {
+              throw new Error('fallback summarization route must differ from the primary route')
             }
             if (value.pressureFoldTokens > value.foldBatchTokens) {
               throw new Error(`pressureFoldTokens (${value.pressureFoldTokens}) must not exceed foldBatchTokens (${value.foldBatchTokens})`)
@@ -215,7 +253,10 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
           onChange: () => {
             const value = source()
             const route = cleanRoute(value.summarizationRoute)
-            if (!routeIsComplete(route) || route.provider.length === 0) return
+            const fallbackRoute = cleanRoute(value.fallbackSummarizationRoute)
+            if (!routeIsComplete(route) || !routeIsConfigured(route)) return
+            if (!routeIsComplete(fallbackRoute)) return
+            if (routeIsConfigured(fallbackRoute) && routesEqual(route, fallbackRoute)) return
 
             const nextRollingConfig = normalizeRolling({
               ...this.rollingConfig,
@@ -233,6 +274,7 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
               summarizationModel: route.model,
             }
             this.rollingConfig = nextRollingConfig
+            this.fallbackSummarizationRoute = fallbackRoute
             this.config = nextConfig
           },
         })
@@ -248,9 +290,53 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
     const children = Array.isArray(metadata?.trustedChildNodeIds)
       ? [...new Set(metadata.trustedChildNodeIds)]
       : []
-    const result = await super.summarize(...args.slice(0, 3))
-    if (result === null || typeof result !== 'object' || !Array.isArray(result.summary)) {
-      throw new TypeError('BasicCompactionEngine.summarize() returned an invalid summary result')
+    const summarizeArgs = args.slice(0, 3)
+    const primaryRoute = cleanRoute({
+      provider: this.config?.summarizationProvider,
+      model: this.config?.summarizationModel,
+    })
+    const fallbackRoute = cleanRoute(this.fallbackSummarizationRoute)
+
+    const attempt = async (route) => {
+      const receiver = route === null ? this : Object.assign(Object.create(this), {
+        config: {
+          ...this.config,
+          summarizationProvider: route.provider,
+          summarizationModel: route.model,
+          modelPolicies: Array.isArray(this.config?.modelPolicies)
+            ? this.config.modelPolicies.map((policy) => ({
+                ...policy,
+                summarizationProvider: route.provider,
+                summarizationModel: route.model,
+              }))
+            : [],
+        },
+      })
+      const result = await super.summarize.call(receiver, ...summarizeArgs)
+      if (result === null || typeof result !== 'object' || !Array.isArray(result.summary)) {
+        throw new TypeError('BasicCompactionEngine.summarize() returned an invalid summary result')
+      }
+      return result
+    }
+
+    let result
+    try {
+      result = await attempt(routeIsConfigured(primaryRoute) ? primaryRoute : null)
+    } catch (primaryError) {
+      const signal = summarizeArgs[2]
+      if (signal?.aborted || !routeIsConfigured(fallbackRoute)) throw primaryError
+      this.ctx.logger?.warn?.(
+        `primary summarization route ${primaryRoute.provider}/${primaryRoute.model} failed; retrying once with fallback ${fallbackRoute.provider}/${fallbackRoute.model}`,
+      )
+      try {
+        result = await attempt(fallbackRoute)
+      } catch (fallbackError) {
+        if (signal?.aborted) throw fallbackError
+        throw new AggregateError(
+          [primaryError, fallbackError],
+          `primary and fallback summarization routes failed (${primaryRoute.provider}/${primaryRoute.model} -> ${fallbackRoute.provider}/${fallbackRoute.model})`,
+        )
+      }
     }
 
     const nodeId = randomUUID()

@@ -16,10 +16,13 @@
       disabled: true
       config:
         mode: rolling
-        # 后台压缩必须明确指定独立路由，绝不回退到当前 Agent。
-        # Background compaction requires an explicit dedicated route and never falls back.
+        # 主路由必须明确；可选备用路由只在主路由失败后重试一次。
+        # The primary route is explicit; the optional backup is tried once after failure.
+        # 两者都不会回退到当前 Agent。 / Neither route falls back to the current Agent.
         summarizationProvider: openai
         summarizationModel: gpt-5.6-sol
+        fallbackSummarizationProvider: anthropic
+        fallbackSummarizationModel: claude-sonnet-4-5
         tailCount: 24
         minRetainTokens: 32000
         pressureFoldTokens: 20000

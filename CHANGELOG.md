@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- 新增可选的备用摘要 provider/model：主路由失败后最多重试一次，取消时不触发备用请求，两个路由都不会回退到主 Agent。
+- 主/备用路由按调用隔离并固定快照，不修改共享 engine config；Web 设置支持从同一模型目录选择、热更新或清空备用路由。
+- Add an optional backup summarizer route with one-shot failover, cancellation preservation, per-call route isolation, and live Web settings.
+
 ## 0.3.0-alpha.9 — 2026-09-21
 
 - 仓库与插件市场展示名统一为英文 `SuperLcm — Lossless Context`；市场提交说明采用中文优先、英文补充的双语格式。

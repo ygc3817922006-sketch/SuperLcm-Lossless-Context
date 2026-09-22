@@ -297,6 +297,9 @@ name: SuperLcm
 mode: rolling
 summarizationProvider: openai
 summarizationModel: gpt-5.6-sol
+# 可选：主压缩模型失败后只重试一次，不会回退到主 Agent。
+fallbackSummarizationProvider: anthropic
+fallbackSummarizationModel: claude-sonnet-4-5
 tailCount: 24
 minRetainTokens: 32000
 pressureFoldTokens: 20000
@@ -305,6 +308,8 @@ softActiveTokens: 160000
 hardActiveTokens: 220000
 foldTiming: background
 ```
+
+备用路由可留空；若配置，provider/model 必须成对填写且不能与主路由相同。只有主路由失败且任务未取消时才调用一次备用路由；备用也失败时会保留两次错误，不再继续重试，更不会使用主 Agent 模型。
 
 160k/220k 是面向大上下文模型的起始值，不应直接复制给小上下文模型。完整策略见 [缓存策略](./docs/CACHE_POLICY.md)，启用前验收步骤见 [VALIDATION.md](./docs/VALIDATION.md)。
 
