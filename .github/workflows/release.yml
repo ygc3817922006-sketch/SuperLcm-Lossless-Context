@@ -1,0 +1,44 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run validate
+      - id: pack
+        shell: bash
+        run: |
+          archive="$(npm pack --silent)"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          sha256sum "$archive" > SHA256SUMS.txt
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE: ${{ steps.pack.outputs.archive }}
+        shell: bash
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## SuperLcm public alpha / 公开测试版
+
+          中文默认、可切换英文的项目页现已上线。本版本重点介绍 LCM 原理、两阶段异步压缩、较小活动上下文、稳定缓存前缀与成本边界，并加入 Windows、Linux、macOS CI。
+
+          The Chinese-default bilingual project site is now available. This release documents the LCM foundation, two-phase asynchronous compaction, bounded active context, prefix-stable caching, and provider-dependent cost savings, with CI on Windows, Linux, and macOS.
+
+          > Install into a dedicated DSH profile and follow the validation guide before enabling it in a primary workspace.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" "$ARCHIVE" SHA256SUMS.txt \
+            --title "SuperLcm $GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            --prerelease

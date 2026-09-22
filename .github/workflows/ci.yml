@@ -7,9 +7,18 @@ on:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
-        node: [22, 24]
-    runs-on: ubuntu-latest
+        include:
+          - os: ubuntu-latest
+            node: 22
+          - os: windows-latest
+            node: 22
+          - os: macos-latest
+            node: 22
+          - os: ubuntu-latest
+            node: 24
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

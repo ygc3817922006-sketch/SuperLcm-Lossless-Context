@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0-alpha.9 — 2026-09-21
+
+- 新增默认中文、可切换英文的公开项目页，引用 LCM 原论文与官方交互式动态讲解，并详细说明两阶段异步压缩、较小活动上下文、冻结前缀缓存与成本边界。
+- 公共安装文档改用 DSH profile 命令；根 README 默认中文并保留完整英文版，新增平台兼容矩阵与安全报告策略。
+- 移除测试中的 POSIX `/tmp` 假设，CI 扩展到 Windows、Linux、macOS；运行时继续只使用 Node.js 跨平台路径解析，不包含本机 `/Users/...` 硬编码。
+- Add a Chinese-default bilingual public site, LCM paper/visual references, portable install docs, and Windows/Linux/macOS CI coverage.
+
 ## 0.3.0-alpha.8 — 2026-09-21
 
 - 高级 rolling 参数改为一次 `scope.mutate()` 原子提交，关联字段不再因逐项校验而产生假失败或部分落盘。

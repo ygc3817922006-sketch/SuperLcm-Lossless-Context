@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'SuperLcm')
-  assert.equal(pkg.version, '0.3.0-alpha.8')
+  assert.equal(pkg.version, '0.3.0-alpha.9')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -67,6 +67,19 @@ test('publication list contains documentation and excludes tests and transient d
   assert.ok(pkg.files.includes('src/'))
   assert.ok(pkg.files.includes('docs/'))
   assert.ok(pkg.files.includes('examples/'))
+  assert.ok(pkg.files.includes('README.en.md'))
   assert.ok(!pkg.files.includes('test/'))
   assert.ok(!pkg.files.some(value => value.endsWith('.sqlite')))
+})
+
+test('public site defaults to Chinese, offers English, and uses portable install guidance', async () => {
+  const [page, script, store] = await Promise.all([text('docs/index.html'), text('docs/site.js'), text('src/store.js')])
+  assert.match(page, /<html lang="zh-CN">/)
+  assert.match(page, /data-set-lang="zh"/)
+  assert.match(page, /data-set-lang="en"/)
+  assert.match(page, /losslesscontext.ai/)
+  assert.match(page, /dsh plugin --profile web add/)
+  assert.ok(script.includes("localStorage.getItem('superlcm-language')||'zh'"))
+  assert.doesNotMatch(store, /\/Users\//)
+  assert.doesNotMatch(store, /process\.platform\s*===\s*['"]darwin/)
 })

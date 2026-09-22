@@ -1,10 +1,31 @@
 # SuperLcm
 
+[English](./README.en.md) · [项目介绍页](https://ygc3817922006-sketch.github.io/SuperLcm/) · [发布版本](https://github.com/ygc3817922006-sketch/SuperLcm/releases)
+
 这是一个面向 DeepSeek Harness（DSH）的 SuperLcm 无损召回上下文插件，核心思路来自 Lossless Claw / SuperLcm Management（LCM，无损上下文管理）。
 
 它把 **DSH 只追加的 Session Event Log（会话事件日志）作为唯一原文真源**。每次压缩摘要都会获得稳定的召回节点 ID；SQLite 只保存摘要 DAG（有向无环图）、父子关系和精确的源事件序号。模型以后可以搜索、描述和展开旧上下文，而不是把摘要冒充成原文。
 
-> 当前版本：`0.3.0-alpha.8`。rolling（滚动）压缩会冻结前缀；压缩摘要模型现在可以独立指定，并可在 WebUI 的插件设置页热更新。原始历史仍由 DSH Event Log 无损保留。
+> 当前版本：`0.3.0-alpha.9`。这是公开 alpha；请把 DSH 与插件版本固定在独立 profile 中验证后再用于主工作区。
+
+## 为什么做 SuperLcm
+
+传统压缩通常等上下文接近上限后，暂停当前请求并生成一个扁平摘要。这会让用户等待摘要完成，让活动上下文长期偏大，也容易因频繁改写开头而破坏 Prompt Cache。
+
+SuperLcm 的目标是：
+
+1. **异步压缩，不阻塞对话**：提前选择安全历史区间，用独立 provider/model 在后台生成摘要；当前 Agent 不等待这个任务。
+2. **保持较小的活动上下文**：模型少读无关旧历史，保留更多输出余量，降低长上下文注意力稀释风险。
+3. **保护缓存前缀**：system message 和已提交 checkpoint 逐字冻结，后续只压缩其后的原文。
+4. **降低 token 与缓存成本**：较短请求减少每轮输入 token；稳定前缀提高 Prompt Cache 复用并减少重复 cache write。具体收益取决于模型提供方的计费规则。
+
+## LCM 原理
+
+SuperLcm 受 Clint Ehrlich 与 Theodore Blackman 的论文 **[LCM: Lossless Context Management](https://papers.voltropy.com/LCM)** 启发。论文使用分层摘要 DAG 管理长历史，同时为每个摘要保留通向原始消息的指针。
+
+推荐先查看论文团队制作的 **[LCM 官方交互式动态讲解](https://www.losslesscontext.ai/)**：它用滚动动画展示传统扁平压缩、fresh tail、增量摘要、摘要聚合以及按需展开。论文另见 [arXiv:2605.04050](https://arxiv.org/abs/2605.04050)。
+
+在 DSH 中，Event Log 是不可变原文真源；活动上下文只携带冻结前缀、摘要 checkpoint 和最近原文；SQLite 保存可重建的 DAG 与精确事件序号；召回工具在需要时回到原始事件。
 
 ## 已实现
 
@@ -39,6 +60,17 @@ SuperLcm 只支持一种自动策略：`mode: "rolling"`、`foldTiming: "backgro
 
 完整策略与 GPT-5.6 Sol 推荐起始值见 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
 
+## 缓存优化
+
+SuperLcm 不猜 Prompt Cache 的 TTL。提交后的 system 和 checkpoint 形成最长逐字稳定前缀；普通压缩只处理它们后面的 raw history。只有硬压力且后段已经无法释放足够空间时，才允许低频合并旧 checkpoint。
+
+```text
+SYSTEM · CHECKPOINT 01 · CHECKPOINT 02 │ RAW HISTORY │ FRESH TAIL
+└──────────── 逐字冻结，可持续命中缓存 ────────────┘
+```
+
+较短的活动请求减少每轮输入 token；稳定前缀减少重复缓存写入。实际缓存命中和费用仍由所用模型提供方决定。
+
 ## 与 gbrain 的边界
 
 `SuperLcm` 管“本次 DSH 工作线程到底发生过什么”；gbrain 管跨会话、跨项目的稳定结论、历史决策和长期知识。两边不应自动双写。只有主代理确认某个结论已经稳定，才应通过单独流程沉淀到 gbrain。
@@ -63,14 +95,27 @@ SQLite 是可重建的派生索引，不是第二套会话真源。删掉 SQLite
 - `@deepseek-ai/dsh-tools`
 - `session/event` 生命周期
 
-先在独立开发 profile（配置环境）中打包：
+### 跨平台路径
+
+运行时代码不包含 macOS 或 `/Users/...` 硬编码。数据库路径按当前操作系统解析：优先使用 `DSH_SUPERLCM_DB`，其次使用 `DSH_HOME/SuperLcm/lcm.sqlite`，最后使用系统用户目录下的 `.dsh/SuperLcm/lcm.sqlite`。路径由 Node.js `node:path` 与 `node:os.homedir()` 处理。CI 覆盖 Windows、Linux、macOS 的 Node.js 22，并在 Linux 上额外覆盖 Node.js 24。
+
+### 从公开 Release 安装
+
+Web profile：
 
 ```bash
-npm run validate
-npm pack
+dsh plugin --profile web add \
+  "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
-不要在正式 DSH profile 目录中不加检查地执行 `pnpm add`，以免额外安装一份 DSH 核心包。DSH 的部分运行时能力依赖共享 Symbol（符号）；同一核心包出现两份实例，可能造成“代码一样但运行时身份不同”。
+ACP profile：
+
+```bash
+dsh plugin --profile acp add \
+  "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
+```
+
+不要在正式 DSH profile 目录中手工执行未经检查的 `pnpm add`，以免额外安装一份 DSH 核心包。使用 `dsh plugin --profile ... add` 让 DSH 管理 profile 依赖。
 
 ### 第一阶段：只挂召回工具
 
@@ -129,3 +174,9 @@ npm pack --dry-run
 ## 架构
 
 见 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) 与 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
+
+## 许可证与署名
+
+MIT。详见 [LICENSE](./LICENSE) 与 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
+
+SuperLcm 是独立项目，不隶属于 Voltropy、Martian Engineering 或 DeepSeek；仓库没有复制 LCM、Lossless Claw 或 DSH 的源文件。

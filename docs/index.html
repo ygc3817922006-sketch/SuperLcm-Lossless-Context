@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#08111f">
+  <meta name="description" content="SuperLcm：面向 DeepSeek Harness 的异步、缓存友好、可精确召回的上下文压缩插件。">
+  <meta property="og:title" content="SuperLcm — 异步无损召回上下文">
+  <meta property="og:description" content="后台压缩不阻塞对话，以稳定前缀提高缓存复用，以更小活动上下文帮助 Agent 保持专注。">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://ygc3817922006-sketch.github.io/SuperLcm/">
+  <title>SuperLcm — 异步无损召回上下文</title>
+  <link rel="stylesheet" href="./site.css">
+  <script type="module" src="./site.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main"><span data-lang="zh">跳到正文</span><span data-lang="en" hidden>Skip to content</span></a>
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="SuperLcm home"><span class="brand-mark">S</span><span>SuperLcm</span></a>
+    <nav aria-label="Primary">
+      <a href="#how"><span data-lang="zh">原理</span><span data-lang="en" hidden>How it works</span></a>
+      <a href="#async"><span data-lang="zh">异步压缩</span><span data-lang="en" hidden>Async</span></a>
+      <a href="#install"><span data-lang="zh">安装</span><span data-lang="en" hidden>Install</span></a>
+      <a href="https://github.com/ygc3817922006-sketch/SuperLcm" rel="noreferrer">GitHub</a>
+    </nav>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-set-lang="zh" aria-pressed="true">中文</button>
+      <button type="button" data-set-lang="en" aria-pressed="false">English</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-copy reveal">
+        <p class="eyebrow"><span class="live-dot"></span><span data-lang="zh">为长时间运行的 DSH Agent 设计</span><span data-lang="en" hidden>Built for long-running DSH agents</span></p>
+        <h1><span data-lang="zh">对话继续，<br><em>压缩在后台。</em></span><span data-lang="en" hidden>Keep talking.<br><em>Compress in the background.</em></span></h1>
+        <p class="lede" data-lang="zh">SuperLcm 把旧历史变成可检索的分层摘要，把最近内容留在较小的活动上下文中。原始事件仍由 DSH 保存，需要细节时可以精确追回。</p>
+        <p class="lede" data-lang="en" hidden>SuperLcm turns older history into a searchable summary hierarchy while keeping recent work in a smaller active context. DSH retains the original events for exact recall when details matter.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#install"><span data-lang="zh">安装 alpha.9</span><span data-lang="en" hidden>Install alpha.9</span></a>
+          <a class="button ghost" href="https://www.losslesscontext.ai/" target="_blank" rel="noreferrer"><span data-lang="zh">查看 LCM 官方动态演示 ↗</span><span data-lang="en" hidden>Open the official LCM visual explainer ↗</span></a>
+        </div>
+        <ul class="platforms" aria-label="Supported platforms">
+          <li>Windows</li><li>Linux</li><li>macOS</li><li>Node.js 22.16+</li>
+        </ul>
+      </div>
+
+      <div class="pipeline-card reveal" aria-label="Asynchronous compaction visualization">
+        <div class="card-top"><span data-lang="zh">实时压缩管线</span><span data-lang="en" hidden>Live compaction pipeline</span><span class="status"><i></i><span data-lang="zh">对话可用</span><span data-lang="en" hidden>chat ready</span></span></div>
+        <div class="pipeline">
+          <div class="lane conversation">
+            <span class="lane-label"><span data-lang="zh">当前对话</span><span data-lang="en" hidden>Active chat</span></span>
+            <div class="message m1"></div><div class="message m2"></div><div class="message m3"></div>
+            <div class="typing"><b></b><b></b><b></b></div>
+          </div>
+          <div class="flow"><span class="packet"></span><span class="packet p2"></span></div>
+          <div class="lane worker">
+            <span class="lane-label"><span data-lang="zh">独立后台模型</span><span data-lang="en" hidden>Detached model</span></span>
+            <div class="worker-core"><span>Σ</span><i></i></div>
+            <small><span data-lang="zh">摘要生成中 · 不阻塞</span><span data-lang="en" hidden>summarizing · non-blocking</span></small>
+          </div>
+          <div class="flow second"><span class="packet"></span></div>
+          <div class="lane checkpoint">
+            <span class="lane-label"><span data-lang="zh">冻结检查点</span><span data-lang="en" hidden>Frozen checkpoint</span></span>
+            <div class="node root">D1</div>
+            <div class="node-row"><div class="node">D0</div><div class="node">D0</div><div class="node">D0</div></div>
+            <small><span data-lang="zh">可搜索 · 可展开</span><span data-lang="en" hidden>searchable · expandable</span></small>
+          </div>
+        </div>
+        <div class="meter"><span data-lang="zh">活动上下文</span><span data-lang="en" hidden>Active context</span><div><i></i></div><strong>bounded</strong></div>
+      </div>
+    </section>
+
+    <section class="trust-strip" aria-label="Core properties">
+      <div><strong>01</strong><span data-lang="zh">原文仍在 DSH Event Log</span><span data-lang="en" hidden>Raw history stays in DSH</span></div>
+      <div><strong>02</strong><span data-lang="zh">摘要 DAG 带精确事件指针</span><span data-lang="en" hidden>Summary DAG with exact pointers</span></div>
+      <div><strong>03</strong><span data-lang="zh">独立模型后台生成摘要</span><span data-lang="en" hidden>Detached background summarizer</span></div>
+      <div><strong>04</strong><span data-lang="zh">冻结前缀保护 Prompt Cache</span><span data-lang="en" hidden>Frozen prefix protects prompt cache</span></div>
+    </section>
+
+    <section class="section" id="how">
+      <div class="section-heading reveal">
+        <p class="kicker">LCM / LOSSLESS CONTEXT MANAGEMENT</p>
+        <h2><span data-lang="zh">小上下文，不等于丢历史</span><span data-lang="en" hidden>Bounded context does not mean lost history</span></h2>
+        <p data-lang="zh">LCM 论文提出确定性的分层摘要 DAG：活动提示只携带近期原文和摘要节点，而每个摘要保留通向原始消息的指针。SuperLcm 把这一思路接到 DSH 的只追加会话日志上。</p>
+        <p data-lang="en" hidden>The LCM paper proposes a deterministic hierarchical summary DAG: the active prompt carries recent raw turns and summary nodes, while every summary retains pointers to its original messages. SuperLcm maps that idea onto DSH's append-only session log.</p>
+      </div>
+      <div class="architecture reveal">
+        <article><span class="icon">▤</span><h3><span data-lang="zh">不可变原文</span><span data-lang="en" hidden>Immutable source</span></h3><p data-lang="zh">DSH Session Event Log 是唯一原文真源。SQLite 不复制整份 transcript。</p><p data-lang="en" hidden>The DSH session event log remains the only raw source of truth. SQLite does not duplicate the transcript.</p></article>
+        <article><span class="icon">⌘</span><h3><span data-lang="zh">分层摘要 DAG</span><span data-lang="en" hidden>Hierarchical DAG</span></h3><p data-lang="zh">较老批次形成 D0 摘要；需要时可继续合并成更高层节点，同时保留来源关系。</p><p data-lang="en" hidden>Older batches become D0 summaries and may later condense into higher levels while preserving provenance.</p></article>
+        <article><span class="icon">⌕</span><h3><span data-lang="zh">按需精确召回</span><span data-lang="en" hidden>Exact recall on demand</span></h3><p data-lang="zh">Agent 可以搜索、查看、逐页展开摘要，最终回到确切的 DSH 事件序号。</p><p data-lang="en" hidden>The agent can search, inspect, and page through summaries until it reaches exact DSH event sequences.</p></article>
+      </div>
+      <a class="official-demo reveal" href="https://www.losslesscontext.ai/" target="_blank" rel="noreferrer">
+        <div class="mini-dag"><i></i><i></i><i></i><i></i><b></b></div>
+        <div><small><span data-lang="zh">论文团队的官方交互式动态讲解</span><span data-lang="en" hidden>Official interactive visual explainer from the paper team</span></small><strong>losslesscontext.ai ↗</strong><p data-lang="zh">滚动查看传统压缩、fresh tail、增量压缩、摘要聚合和按需展开的完整动画。</p><p data-lang="en" hidden>Scroll through animated explanations of traditional compaction, the fresh tail, incremental summaries, condensation, and expansion.</p></div>
+      </a>
+      <p class="source-note"><span data-lang="zh">原理来源：</span><span data-lang="en" hidden>Primary source: </span><a href="https://papers.voltropy.com/LCM" target="_blank" rel="noreferrer">Ehrlich &amp; Blackman, “LCM: Lossless Context Management”</a> · <a href="https://arxiv.org/abs/2605.04050" target="_blank" rel="noreferrer">arXiv:2605.04050</a></p>
+    </section>
+
+    <section class="section async-section" id="async">
+      <div class="section-heading reveal">
+        <p class="kicker">TWO-PHASE / NON-BLOCKING</p>
+        <h2><span data-lang="zh">昂贵的摘要生成，移出用户等待路径</span><span data-lang="en" hidden>Move expensive summarization off the user's wait path</span></h2>
+        <p data-lang="zh">传统同步压缩在请求临界点才开始摘要，用户必须等摘要完成。SuperLcm 提前选择安全区间并在独立 Worker 中生成摘要；对话继续进行，准备好的结果只在稳定性检查通过后原子提交。</p>
+        <p data-lang="en" hidden>Synchronous compaction starts summarizing at the pressure point and makes the user wait. SuperLcm stages a safe range earlier and summarizes it in a detached worker; the conversation continues, and the result is committed atomically only after stability checks pass.</p>
+      </div>
+      <ol class="steps reveal">
+        <li><span>1</span><div><h3><span data-lang="zh">固定安全选区</span><span data-lang="en" hidden>Stage a safe range</span></h3><p data-lang="zh">保护最新消息和 token 下限，绝不拆开工具调用对。</p><p data-lang="en" hidden>Protect the fresh tail and token floor without splitting tool-call pairs.</p></div></li>
+        <li><span>2</span><div><h3><span data-lang="zh">后台独立摘要</span><span data-lang="en" hidden>Summarize off-thread</span></h3><p data-lang="zh">明确指定 provider/model，独立 AbortController，不借用当前 Agent。</p><p data-lang="en" hidden>Use an explicit provider/model and independent abort controller—never the active agent.</p></div></li>
+        <li><span>3</span><div><h3><span data-lang="zh">继续接收新消息</span><span data-lang="en" hidden>Keep accepting turns</span></h3><p data-lang="zh">尾部可以增长；摘要任务不会被 await 在当前回复里。</p><p data-lang="en" hidden>The tail may grow; the active reply never awaits the summarization job.</p></div></li>
+        <li><span>4</span><div><h3><span data-lang="zh">校验后原子提交</span><span data-lang="en" hidden>Validate, then commit</span></h3><p data-lang="zh">选区变化就丢弃重做；稳定时写入完整 DSH 压缩事务。</p><p data-lang="en" hidden>Discard stale work; otherwise write one complete DSH compaction transaction.</p></div></li>
+      </ol>
+      <div class="comparison reveal">
+        <div class="sync"><h3><span data-lang="zh">同步压缩</span><span data-lang="en" hidden>Synchronous compaction</span></h3><div class="bar"><i></i><b></b></div><p><span data-lang="zh">回复 → <strong>等待摘要</strong> → 继续</span><span data-lang="en" hidden>reply → <strong>wait for summary</strong> → continue</span></p></div>
+        <div class="async"><h3>SuperLcm</h3><div class="bar"><i></i><b></b></div><p><span data-lang="zh">回复持续进行　摘要在后台并行</span><span data-lang="en" hidden>replies continue while summary runs in parallel</span></p></div>
+      </div>
+    </section>
+
+    <section class="section benefits">
+      <div class="section-heading reveal">
+        <p class="kicker">WHY A SMALLER ACTIVE CONTEXT?</p>
+        <h2><span data-lang="zh">让 Agent 把注意力留给当前任务</span><span data-lang="en" hidden>Keep the agent focused on the work at hand</span></h2>
+      </div>
+      <div class="benefit-grid">
+        <article class="reveal"><b>01</b><h3><span data-lang="zh">减少等待</span><span data-lang="en" hidden>Less waiting</span></h3><p data-lang="zh">摘要生成离开当前回复的阻塞路径。压力到来时，通常已有 ready 结果可提交。</p><p data-lang="en" hidden>Summary generation leaves the blocking reply path. A ready result is often available when pressure arrives.</p></article>
+        <article class="reveal"><b>02</b><h3><span data-lang="zh">保持较小上下文</span><span data-lang="en" hidden>Bounded active context</span></h3><p data-lang="zh">模型少读无关旧内容，获得更多输出余量，也降低长上下文中的注意力稀释风险。</p><p data-lang="en" hidden>The model reads less stale material, gains output headroom, and faces less long-context distraction.</p></article>
+        <article class="reveal"><b>03</b><h3><span data-lang="zh">稳定缓存前缀</span><span data-lang="en" hidden>Stable cache prefix</span></h3><p data-lang="zh">system 与已提交 checkpoint 冻结不改；后续只压缩其后的原文，尽量复用 Prompt Cache。</p><p data-lang="en" hidden>The system message and committed checkpoints stay byte-stable; later folds touch only newer raw history, maximizing prompt-cache reuse.</p></article>
+        <article class="reveal"><b>04</b><h3><span data-lang="zh">更低 token 与缓存成本</span><span data-lang="en" hidden>Lower token and cache cost</span></h3><p data-lang="zh">更短的活动请求减少每轮输入 token；稳定前缀减少重复 cache write。实际价格取决于模型提供方。</p><p data-lang="en" hidden>Shorter active requests reduce input tokens, while a stable prefix avoids repeated cache writes. Exact savings depend on the provider.</p></article>
+      </div>
+    </section>
+
+    <section class="section cache-section">
+      <div class="section-heading reveal">
+        <p class="kicker">PREFIX-STABLE CACHE DESIGN</p>
+        <h2><span data-lang="zh">不猜缓存多久，只保证前缀不乱变</span><span data-lang="en" hidden>Do not guess cache TTL—keep the prefix stable</span></h2>
+        <p data-lang="zh">SuperLcm 不依赖“缓存几分钟后变冷”的猜测。提交后的 system 和 checkpoint 形成冻结前缀；新的压缩只处理后面的 raw history。只有硬压力且后段已经无法释放足够空间时，才合并旧 checkpoint。</p>
+        <p data-lang="en" hidden>SuperLcm does not guess when a cache becomes cold. The system message and committed checkpoints form a frozen prefix; new compaction only touches later raw history. Old checkpoints merge only as a hard-pressure fallback.</p>
+      </div>
+      <div class="prefix-demo reveal">
+        <div class="prefix-row"><span class="fixed">SYSTEM</span><span class="fixed">CHECKPOINT 01</span><span class="fixed">CHECKPOINT 02</span><span class="raw">RAW</span><span class="raw">RAW</span><span class="tail">FRESH TAIL</span></div>
+        <div class="braces"><span class="frozen"><span data-lang="zh">逐字稳定 · 可缓存前缀</span><span data-lang="en" hidden>byte-stable · cacheable prefix</span></span><span class="mutable"><span data-lang="zh">只处理这里</span><span data-lang="en" hidden>fold only here</span></span></div>
+      </div>
+    </section>
+
+    <section class="section install" id="install">
+      <div class="section-heading reveal">
+        <p class="kicker">PUBLIC ALPHA</p>
+        <h2><span data-lang="zh">通过 DSH profile 安装</span><span data-lang="en" hidden>Install through a DSH profile</span></h2>
+        <p data-lang="zh">先在独立 profile 验证。默认安装只挂载召回/修复工具，不会偷偷添加第二个压缩提供方。</p>
+        <p data-lang="en" hidden>Validate in a dedicated profile first. The default bundle mounts recall/repair tools only and never sneaks in a second compaction provider.</p>
+      </div>
+      <div class="terminal reveal">
+        <div class="terminal-top"><i></i><i></i><i></i><span>DSH · web profile</span><button type="button" data-copy="#install-command"><span data-lang="zh">复制</span><span data-lang="en" hidden>Copy</span></button></div>
+        <pre id="install-command"><code>dsh plugin --profile web add "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"</code></pre>
+      </div>
+      <div class="install-notes reveal">
+        <div><strong><span data-lang="zh">第一阶段</span><span data-lang="en" hidden>Stage A</span></strong><p data-lang="zh">直接使用六个召回与修复工具。</p><p data-lang="en" hidden>Use the six recall and repair tools immediately.</p></div>
+        <div><strong><span data-lang="zh">第二阶段</span><span data-lang="en" hidden>Stage B</span></strong><p data-lang="zh">按示例把现有 compaction 节点替换为 SuperLcm。不要并列两个提供方。</p><p data-lang="en" hidden>Replace the existing compaction node with SuperLcm. Never run two providers side by side.</p></div>
+        <div><strong><span data-lang="zh">跨平台存储</span><span data-lang="en" hidden>Portable storage</span></strong><p data-lang="zh">路径由 Node.js 按当前系统解析：优先 DSH_SUPERLCM_DB，其次 DSH_HOME，最后使用系统用户目录。</p><p data-lang="en" hidden>Node.js resolves paths for the current OS: DSH_SUPERLCM_DB, then DSH_HOME, then the platform user home.</p></div>
+      </div>
+      <div class="warning reveal"><strong>Alpha</strong><p data-lang="zh">DSH 接口仍在演进。请固定 SuperLcm 与 DSH 版本，并按验证指南在一次性会话中测试后再用于主工作区。</p><p data-lang="en" hidden>DSH interfaces are still evolving. Pin both SuperLcm and DSH, then follow the validation guide in a disposable session before enabling it in a primary workspace.</p></div>
+      <div class="center-actions reveal"><a class="button primary" href="https://github.com/ygc3817922006-sketch/SuperLcm/releases" rel="noreferrer"><span data-lang="zh">查看发布版本</span><span data-lang="en" hidden>View releases</span></a><a class="button ghost" href="https://github.com/ygc3817922006-sketch/SuperLcm/blob/main/docs/VALIDATION.md" rel="noreferrer"><span data-lang="zh">阅读验证指南</span><span data-lang="en" hidden>Read validation guide</span></a></div>
+    </section>
+  </main>
+
+  <footer>
+    <div><span class="brand-mark">S</span><strong>SuperLcm</strong></div>
+    <p><span data-lang="zh">独立的开源 DSH 插件。受 LCM 论文启发，不隶属于 Voltropy、Martian Engineering 或 DeepSeek。</span><span data-lang="en" hidden>An independent open-source DSH plugin inspired by the LCM paper; not affiliated with Voltropy, Martian Engineering, or DeepSeek.</span></p>
+    <div class="footer-links"><a href="https://papers.voltropy.com/LCM">LCM paper</a><a href="https://www.losslesscontext.ai/">Visual explainer</a><a href="https://github.com/ygc3817922006-sketch/SuperLcm">GitHub</a><a href="https://github.com/ygc3817922006-sketch/SuperLcm/blob/main/LICENSE">MIT</a></div>
+  </footer>
+</body>
+</html>

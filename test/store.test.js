@@ -36,9 +36,11 @@ function node(overrides = {}) {
   }
 }
 
-test('resolveDatabasePath honors explicit database', () => {
-  assert.equal(resolveDatabasePath({ DSH_SUPERLCM_DB: '/tmp/custom-superlcm.sqlite', DSH_LOSSLESS_DB: '/tmp/legacy.sqlite' }), '/tmp/custom-superlcm.sqlite')
-  assert.equal(resolveDatabasePath({ DSH_LOSSLESS_DB: '/tmp/legacy.sqlite' }), '/tmp/legacy.sqlite')
+test('resolveDatabasePath honors explicit platform-native database paths', () => {
+  const explicit = join(tmpdir(), 'custom-superlcm.sqlite')
+  const legacy = join(tmpdir(), 'legacy-superlcm.sqlite')
+  assert.equal(resolveDatabasePath({ DSH_SUPERLCM_DB: explicit, DSH_LOSSLESS_DB: legacy }), explicit)
+  assert.equal(resolveDatabasePath({ DSH_LOSSLESS_DB: legacy }), legacy)
 })
 
 test('resolveDatabasePath selects the new home and preserves legacy fallback', async () => {
