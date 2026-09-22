@@ -1,7 +1,7 @@
 {
   "name": "SuperLcm",
   "version": "0.3.0-alpha.9",
-  "description": "SuperLcm hierarchical context compaction and exact recall for DeepSeek Harness, backed by the durable DSH session log.",
+  "description": "SuperLcm — Lossless Context for DeepSeek Harness: fully asynchronous, cache-friendly compaction with exact recall.",
   "type": "module",
   "main": "./src/engine.js",
   "exports": {
@@ -54,17 +54,18 @@
     "context-compaction",
     "SuperLcm",
     "lossless-recall",
+    "lossless-context",
     "memory",
     "dag"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ygc3817922006-sketch/SuperLcm.git"
+    "url": "git+https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context.git"
   },
   "bugs": {
-    "url": "https://github.com/ygc3817922006-sketch/SuperLcm/issues"
+    "url": "https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/issues"
   },
-  "homepage": "https://github.com/ygc3817922006-sketch/SuperLcm#readme",
+  "homepage": "https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context#readme",
   "license": "MIT",
   "engines": {
     "node": ">=22.16.0"

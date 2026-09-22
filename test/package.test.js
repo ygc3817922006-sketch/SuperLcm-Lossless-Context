@@ -81,7 +81,8 @@ test('repository README is the Chinese-first detailed project page', async () =>
     text('src/store.js'),
     readFile(join(root, 'assets/lcm-principle.gif')),
   ])
-  assert.match(readme, /^# SuperLcm/m)
+  assert.match(readme, /^# SuperLcm — Lossless Context$/m)
+  assert.match(english, /^# SuperLcm — Lossless Context$/m)
   assert.match(readme, /losslesscontext\.ai/)
   assert.match(readme, /assets\/lcm-principle\.gif/)
   assert.match(readme, /全面异步压缩/)
