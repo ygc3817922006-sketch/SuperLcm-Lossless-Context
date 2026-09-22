@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'SuperLcm')
-  assert.equal(pkg.version, '0.3.0-alpha.10')
+  assert.equal(pkg.version, '0.3.0-alpha.11')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -34,27 +34,24 @@ test('package exports the backend and all stable library leaves', async () => {
 
 test('web settings expose an atomic catalog-backed summarizer route and rolling defaults', async () => {
   const client = await text('lib/client.js')
-  assert.match(client, /summarizationRoute/)
-  assert.match(client, /fallbackSummarizationRoute/)
+  assert.match(client, /summarizationProvider/)
+  assert.match(client, /fallbackSummarizationModel/)
   assert.match(client, /fallbackSummarizerHeading/)
   assert.match(client, /remote\.session\.modelCatalog\(\)/)
   assert.match(client, /const inject = \[[^\]]*"remote\.session"[^\]]*\]/)
-  assert.match(client, /scope\.set\(field, desired\)/)
-  assert.doesNotMatch(client, /scope\.set\("summarizationProvider"/)
-  assert.doesNotMatch(client, /scope\.set\("summarizationModel"/)
+  assert.match(client, /configForms\.get\(ENGINE_ENTRY_ID\)/)
+  assert.doesNotMatch(client, /settingsScope/)
   assert.match(client, /foldBatchTokens:\s*64000/)
   assert.match(client, /softActiveTokens:\s*160000/)
   assert.match(client, /hardActiveTokens:\s*220000/)
   assert.doesNotMatch(client, /cacheTtlSeconds/)
   assert.doesNotMatch(client, /thresholdRatio/)
   assert.doesNotMatch(client, /retainRatio/)
-  assert.match(client, /scope\.mutate\(ops, before\.revision\)/)
-  assert.doesNotMatch(client, /await scope\.set\(field\.key/)
+  assert.match(client, /scope\.mutate\(/)
   assert.match(client, /plugins\.bundle\.config/)
   assert.match(client, /key:\s*"SuperLcm"/)
-  assert.match(client, /SETTINGS_NAMESPACE = "superlcm"/)
+  assert.match(client, /ENGINE_ENTRY_ID = "SuperLcm-engine"/)
   assert.doesNotMatch(client, /settings\.plugin\.item/)
-  assert.doesNotMatch(client, /SETTINGS_NAMESPACE = "SuperLcm"/)
 })
 
 test('default bundle is safe: tools are mounted but no second compaction provider is auto-mounted', async () => {

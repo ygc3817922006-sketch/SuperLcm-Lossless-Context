@@ -17,6 +17,8 @@ async function withEngine(run, config = {}) {
     tokenMeter: { measure(session) { return session.measurement } },
     on(name, listener) { listeners.set(name, listener); return () => listeners.delete(name) },
     effect(factory) { const dispose = factory(); if (typeof dispose === 'function') disposers.push(dispose); return dispose },
+    // dsh 0.1.7: Service 基类构造时经 ctx.reflect.provide 注册自身。
+    reflect: { provide() {} },
   }
   const engine = new SuperLcmCompactionEngine(ctx, config)
   try { await run({ engine, listeners }) }

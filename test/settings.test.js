@@ -5,61 +5,47 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import SuperLcmCompactionEngine from '../src/engine.js'
 
+// dsh 0.1.7: installSection 已删除，改为 Config volatile + loader/volatile-update。
+// 这里模拟 Loader 的行为：把新 config 提交进 fiber.config 并触发事件。
+
 async function withSettingsEngine(run) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-lcm-settings-'))
   const previous = process.env.DSH_SUPERLCM_DB
   process.env.DSH_SUPERLCM_DB = join(dir, 'lcm.sqlite')
 
   const disposers = []
-  let installed
-  let source
+  let fiberConfig
   const ctx = {
     logger: { info() {}, warn() {} },
     tokenMeter: { measure() { return { nodes: [], totalTokens: 0 } } },
-    on() { return () => {} },
+    on(event, handler) {
+      if (event === 'loader/volatile-update') volatileHandlers.push(handler)
+      return () => {}
+    },
     effect(factory) {
       const dispose = factory()
       if (typeof dispose === 'function') disposers.push(dispose)
       return dispose
     },
-    inject(dependencies, callback) {
-      assert.deepEqual(dependencies, ['settings'])
-      callback({
-        settings: {
-          installSection(_owner, namespace, _schema, entry, options) {
-            source = {
-              ...entry,
-              summarizationRoute: { ...entry.summarizationRoute },
-              fallbackSummarizationRoute: { ...entry.fallbackSummarizationRoute },
-            }
-            installed = {
-              namespace,
-              entry: {
-                ...entry,
-                summarizationRoute: { ...entry.summarizationRoute },
-                fallbackSummarizationRoute: { ...entry.fallbackSummarizationRoute },
-              },
-              options,
-            }
-            options.setSource(() => source)
-          },
-        },
-      })
-    },
+    // dsh 0.1.7: Service 基类构造时经 ctx.reflect.provide 注册自身。
+    reflect: { provide() {} },
+    get fiber() { return { config: fiberConfig } },
   }
+  const volatileHandlers = []
 
   const engine = new SuperLcmCompactionEngine(ctx, {
     summarizationProvider: '',
     summarizationModel: '',
   })
 
+  // 模拟 loader/volatile-update：提交新 config 后触发事件。
+  const commitConfig = (next) => {
+    fiberConfig = next
+    for (const handler of volatileHandlers) handler([])
+  }
+
   try {
-    await run({
-      engine,
-      installed,
-      getSource: () => source,
-      setSource: (next) => { source = next },
-    })
+    await run({ engine, commitConfig })
   } finally {
     for (const dispose of disposers.reverse()) await dispose()
     if (previous === undefined) delete process.env.DSH_SUPERLCM_DB
@@ -68,45 +54,45 @@ async function withSettingsEngine(run) {
   }
 }
 
-test('summarizer route requires an explicit atomic provider-model pair', async () => withSettingsEngine(async ({ installed, getSource }) => {
-  assert.equal(installed.namespace, 'superlcm')
-  assert.deepEqual(installed.entry.summarizationRoute, { provider: '', model: '' })
-  assert.deepEqual(installed.entry.fallbackSummarizationRoute, { provider: '', model: '' })
-
-  assert.throws(() => installed.options.validate({
-    ...getSource(),
-    summarizationRoute: { provider: 'openai', model: '' },
+test('summarizer route requires an explicit atomic provider-model pair', async () => withSettingsEngine(async ({ engine, commitConfig }) => {
+  assert.throws(() => engine.applyRuntimeConfig({
+    summarizationProvider: 'openai',
+    summarizationModel: '',
+    fallbackSummarizationProvider: '',
+    fallbackSummarizationModel: '',
   }), /requires an explicit summarization provider and model/)
 
-  assert.throws(() => installed.options.validate({
-    ...getSource(),
-    summarizationRoute: { provider: '', model: '' },
+  assert.throws(() => engine.applyRuntimeConfig({
+    summarizationProvider: '',
+    summarizationModel: '',
+    fallbackSummarizationProvider: '',
+    fallbackSummarizationModel: '',
   }), /requires an explicit summarization provider and model/)
 
-  assert.throws(() => installed.options.validate({
-    ...getSource(),
-    summarizationRoute: { provider: 'openai', model: 'primary' },
-    fallbackSummarizationRoute: { provider: 'anthropic', model: '' },
+  assert.throws(() => engine.applyRuntimeConfig({
+    summarizationProvider: 'openai',
+    summarizationModel: 'primary',
+    fallbackSummarizationProvider: 'anthropic',
+    fallbackSummarizationModel: '',
   }), /fallback summarization provider and model must be set together/)
 
-  assert.throws(() => installed.options.validate({
-    ...getSource(),
-    summarizationRoute: { provider: 'openai', model: 'same' },
-    fallbackSummarizationRoute: { provider: 'openai', model: 'same' },
+  assert.throws(() => engine.applyRuntimeConfig({
+    summarizationProvider: 'openai',
+    summarizationModel: 'same',
+    fallbackSummarizationProvider: 'openai',
+    fallbackSummarizationModel: 'same',
   }), /fallback summarization route must differ/)
 }))
 
-test('atomic dedicated summarizer route applies live and blank changes are ignored', async () => withSettingsEngine(async ({ engine, installed, getSource, setSource }) => {
-  const dedicated = {
-    ...getSource(),
-    summarizationRoute: { provider: '  openai  ', model: '  gpt-5.6-sol  ' },
-    fallbackSummarizationRoute: { provider: '  anthropic  ', model: '  claude-sonnet  ' },
+test('atomic dedicated summarizer route applies live and blank changes are ignored', async () => withSettingsEngine(async ({ engine, commitConfig }) => {
+  commitConfig({
+    summarizationProvider: '  openai  ',
+    summarizationModel: '  gpt-5.6-sol  ',
+    fallbackSummarizationProvider: '  anthropic  ',
+    fallbackSummarizationModel: '  claude-sonnet  ',
     tailCount: 31,
     minRetainTokens: 36000,
-  }
-  installed.options.validate(dedicated)
-  setSource(dedicated)
-  installed.options.onChange()
+  })
 
   assert.equal(engine.config.summarizationProvider, 'openai')
   assert.equal(engine.config.summarizationModel, 'gpt-5.6-sol')
@@ -114,34 +100,38 @@ test('atomic dedicated summarizer route applies live and blank changes are ignor
   assert.equal(engine.rollingConfig.tailCount, 31)
   assert.equal(engine.rollingConfig.minRetainTokens, 36000)
 
-  const switched = {
-    ...getSource(),
-    summarizationRoute: { provider: 'anthropic', model: 'claude-opus-5' },
-  }
-  installed.options.validate(switched)
-  setSource(switched)
-  installed.options.onChange()
+  commitConfig({
+    summarizationProvider: 'anthropic',
+    summarizationModel: 'claude-opus-5',
+    fallbackSummarizationProvider: 'anthropic',
+    fallbackSummarizationModel: 'claude-sonnet',
+    tailCount: 31,
+    minRetainTokens: 36000,
+  })
 
   assert.equal(engine.config.summarizationProvider, 'anthropic')
   assert.equal(engine.config.summarizationModel, 'claude-opus-5')
   assert.deepEqual(engine.fallbackSummarizationRoute, { provider: 'anthropic', model: 'claude-sonnet' })
 
-  const withoutFallback = {
-    ...getSource(),
-    fallbackSummarizationRoute: { provider: '', model: '' },
-  }
-  installed.options.validate(withoutFallback)
-  setSource(withoutFallback)
-  installed.options.onChange()
+  commitConfig({
+    summarizationProvider: 'anthropic',
+    summarizationModel: 'claude-opus-5',
+    fallbackSummarizationProvider: '',
+    fallbackSummarizationModel: '',
+    tailCount: 31,
+    minRetainTokens: 36000,
+  })
   assert.deepEqual(engine.fallbackSummarizationRoute, { provider: '', model: '' })
 
-  const followAgent = {
-    ...getSource(),
-    summarizationRoute: { provider: '', model: '' },
-  }
-  assert.throws(() => installed.options.validate(followAgent), /requires an explicit summarization provider and model/)
-  setSource(followAgent)
-  installed.options.onChange()
+  // 主路由清空：applyRuntimeConfig 直接调用仍拒绝（单元层）。
+  assert.throws(() => engine.applyRuntimeConfig({
+    summarizationProvider: '',
+    summarizationModel: '',
+    fallbackSummarizationProvider: '',
+    fallbackSummarizationModel: '',
+    tailCount: 31,
+    minRetainTokens: 36000,
+  }), /requires an explicit summarization provider and model/)
 
   assert.equal(engine.config.summarizationProvider, 'anthropic')
   assert.equal(engine.config.summarizationModel, 'claude-opus-5')

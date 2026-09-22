@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.3.0-alpha.10 — 2026-09-22
+## 0.3.0-alpha.11 — 2026-09-22
+
+- 适配 DSH 0.1.7：宿主侧 `settings.installSection()` 已被官方删除，改为在引擎 `Config` 上声明 `.volatile()` 字段并监听 `loader/volatile-update`，设置变更继续热更新运行中的引擎实例。
+- Web 客户端 `settingsScope` 服务改名为 `configForms`，`bind({namespace})` 改为 `get(entryId)`；表单按引擎条目 id（约定 `SuperLcm-engine`）寻址，路由字段拆为宿主 Config 的标量 `summarizationProvider/Model` 与 `fallbackSummarizationProvider/Model`，主/备用路由切换改用一次 `mutate()` 原子提交。
+- 注意：`z.intersect` 会拆散 volatile 引用（实测 schemastery 3.18.3），引擎 Config 改为单层平铺 `z.object`，继承自 BasicCompactionEngine 的字段同形重声明。
+- Migrate to the DSH 0.1.7 settings model: volatile Config fields plus `loader/volatile-update` replace the removed `installSection` API, and the web form targets the engine entry through `configForms.get()` with atomic route mutations.
+
+## 0.3.0-alpha.10 — 2026-09-22 — 2026-09-22
 
 - 新增可选的备用摘要 provider/model：主路由失败后最多重试一次，取消时不触发备用请求，两个路由都不会回退到主 Agent。
 - 主/备用路由按调用隔离并固定快照，不修改共享 engine config；Web 设置支持从同一模型目录选择、热更新或清空备用路由。

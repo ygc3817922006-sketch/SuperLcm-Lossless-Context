@@ -103,6 +103,7 @@ function routesEqual(left, right) {
 }
 
 const SETTINGS_NAMESPACE = 'superlcm'
+
 const SUMMARIZATION_ROUTE_SCHEMA = z.object({
   provider: z.string().default(''),
   model: z.string().default(''),
@@ -120,8 +121,20 @@ const SETTINGS_SCHEMA = z.object({
   foldTiming: z.const('background').default(ROLLING_DEFAULTS.foldTiming),
 })
 
-function splitConfig(config) {
+// dsh 0.1.7: volatile 字段 resolve 后是 { get() } 引用对象，读取时解包。
+function unwrapVolatile(value) {
+  return typeof value?.get === 'function' ? value.get() : value
+}
+
+function unwrapConfig(config) {
   const raw = config ?? {}
+  const out = {}
+  for (const [key, value] of Object.entries(raw)) out[key] = unwrapVolatile(value)
+  return out
+}
+
+function splitConfig(config) {
+  const raw = unwrapConfig(config)
   const primaryRoute = cleanRoute({
     provider: raw.summarizationProvider,
     model: raw.summarizationModel,
@@ -131,7 +144,7 @@ function splitConfig(config) {
     model: raw.fallbackSummarizationModel,
   })
   if (!routeIsComplete(fallbackRoute)) {
-    throw new Error('fallbackSummarizationProvider and fallbackSummarizationModel must be set together')
+    throw new Error('fallback summarization provider and model must be set together')
   }
   if (routeIsConfigured(fallbackRoute) && !routeIsConfigured(primaryRoute)) {
     throw new Error('fallback summarization route requires an explicit primary route')
@@ -175,6 +188,37 @@ function reportIndexFailure(error) {
 }
 
 export class SuperLcmCompactionEngine extends BasicCompactionEngine {
+  // dsh 0.1.7: 运行时可热更字段（原 installSection 的 settings 区）改为在 Config 上
+  // 声明 volatile。Settings 表单直接读写本条目的 Config，变更经 loader 的
+  // volatile 提交路径更新 fiber.config 并触发 loader/volatile-update。
+  // 注意：必须用单层 z.object —— z.intersect 会把 volatile ref 按 key 拆散合并，
+  // 丢失引用语义（实测 schemastery 3.18.3），所以这里平铺声明全部字段。
+  static Config = z.object({
+    // —— 继承自 BasicCompactionEngine.Config 的字段（保持同形）——
+    thresholdRatio: z.number(),
+    headroomTokens: z.number().step(1).min(0),
+    retainRatio: z.number(),
+    retainTokens: z.number().step(1).min(0),
+    maxTokens: z.number().step(1).min(1),
+    compactionRetries: z.number().step(1).min(0),
+    maxOverflowRetries: z.number().step(1).min(0),
+    modelPolicies: z.array(z.object({})),
+    auto: z.boolean(),
+    // —— SuperLcm 自有字段，全部 volatile，可运行中热更 ——
+    summarizationProvider: z.string().default('').volatile(),
+    summarizationModel: z.string().default('').volatile(),
+    fallbackSummarizationProvider: z.string().default('').volatile(),
+    fallbackSummarizationModel: z.string().default('').volatile(),
+    mode: z.const('rolling').default(ROLLING_DEFAULTS.mode).volatile(),
+    tailCount: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.tailCount).volatile(),
+    minRetainTokens: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.minRetainTokens).volatile(),
+    pressureFoldTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.pressureFoldTokens).volatile(),
+    foldBatchTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.foldBatchTokens).volatile(),
+    softActiveTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.softActiveTokens).volatile(),
+    hardActiveTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(ROLLING_DEFAULTS.hardActiveTokens).volatile(),
+    foldTiming: z.const('background').default(ROLLING_DEFAULTS.foldTiming).volatile(),
+  })
+
   constructor(ctx, config = {}) {
     const { base, rolling, fallbackRoute } = splitConfig(config)
     super(ctx, base)
@@ -206,82 +250,53 @@ export class SuperLcmCompactionEngine extends BasicCompactionEngine {
       }
     })
 
-    this.installSettingsSection(ctx)
+    this.watchVolatileConfig(ctx)
   }
 
-  installSettingsSection(ctx) {
-    const entry = {
-      summarizationRoute: cleanRoute({
-        provider: this.config?.summarizationProvider,
-        model: this.config?.summarizationModel,
-      }),
-      fallbackSummarizationRoute: cleanRoute(this.fallbackSummarizationRoute),
-      tailCount: this.rollingConfig.tailCount,
-      minRetainTokens: this.rollingConfig.minRetainTokens,
-      pressureFoldTokens: this.rollingConfig.pressureFoldTokens,
-      foldBatchTokens: this.rollingConfig.foldBatchTokens,
-      softActiveTokens: this.rollingConfig.softActiveTokens,
-      hardActiveTokens: this.rollingConfig.hardActiveTokens,
-      foldTiming: this.rollingConfig.foldTiming,
-    }
-    let source = () => entry
-    try {
-      ctx.inject(['settings'], (settingsCtx) => {
-        settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, SETTINGS_SCHEMA, entry, {
-          validate: (value) => {
-            const route = cleanRoute(value.summarizationRoute)
-            const fallbackRoute = cleanRoute(value.fallbackSummarizationRoute)
-            if (!routeIsComplete(route) || !routeIsConfigured(route)) {
-              throw new Error('background compaction requires an explicit summarization provider and model')
-            }
-            if (!routeIsComplete(fallbackRoute)) {
-              throw new Error('fallback summarization provider and model must be set together')
-            }
-            if (routeIsConfigured(fallbackRoute) && routesEqual(route, fallbackRoute)) {
-              throw new Error('fallback summarization route must differ from the primary route')
-            }
-            if (value.pressureFoldTokens > value.foldBatchTokens) {
-              throw new Error(`pressureFoldTokens (${value.pressureFoldTokens}) must not exceed foldBatchTokens (${value.foldBatchTokens})`)
-            }
-            if (value.hardActiveTokens <= value.softActiveTokens) {
-              throw new Error(`hardActiveTokens (${value.hardActiveTokens}) must be greater than softActiveTokens (${value.softActiveTokens})`)
-            }
-          },
-          setSource: (current) => {
-            source = current
-          },
-          onChange: () => {
-            const value = source()
-            const route = cleanRoute(value.summarizationRoute)
-            const fallbackRoute = cleanRoute(value.fallbackSummarizationRoute)
-            if (!routeIsComplete(route) || !routeIsConfigured(route)) return
-            if (!routeIsComplete(fallbackRoute)) return
-            if (routeIsConfigured(fallbackRoute) && routesEqual(route, fallbackRoute)) return
+  // dsh 0.1.7 迁移：原 installSection 的 onChange/validate 由这里承接。
+  // volatile 字段变更时 Loader 会把新值提交进运行中的 fiber.config，
+  // 并对本 fiber 发 loader/volatile-update；这里重读 config 派生运行参数。
+  watchVolatileConfig(ctx) {
+    ctx.on('loader/volatile-update', () => {
+      try {
+        this.applyRuntimeConfig(ctx.fiber?.config)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        ctx.logger?.warn?.(`[SuperLcm] 配置变更被拒绝 / rejected config change: ${message}`)
+      }
+    })
+  }
 
-            const nextRollingConfig = normalizeRolling({
-              ...this.rollingConfig,
-              tailCount: value.tailCount,
-              minRetainTokens: value.minRetainTokens,
-              pressureFoldTokens: value.pressureFoldTokens,
-              foldBatchTokens: value.foldBatchTokens,
-              softActiveTokens: value.softActiveTokens,
-              hardActiveTokens: value.hardActiveTokens,
-              foldTiming: value.foldTiming,
-            })
-            const nextConfig = {
-              ...this.config,
-              summarizationProvider: route.provider,
-              summarizationModel: route.model,
-            }
-            this.rollingConfig = nextRollingConfig
-            this.fallbackSummarizationRoute = fallbackRoute
-            this.config = nextConfig
-          },
-        })
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      ctx.logger?.warn?.(`[SuperLcm] 设置区域不可用 / settings section unavailable: ${message}`)
+  applyRuntimeConfig(config) {
+    const raw = unwrapConfig(config)
+    // 先做主路由校验（与旧版 validate 的报错顺序一致），再走 splitConfig
+    // 的 fallback 完整性检查。
+    const route = cleanRoute({
+      provider: raw.summarizationProvider,
+      model: raw.summarizationModel,
+    })
+    if (!routeIsComplete(route) || !routeIsConfigured(route)) {
+      throw new Error('background compaction requires an explicit summarization provider and model')
+    }
+    const { rolling, fallbackRoute } = splitConfig(raw)
+    if (!routeIsComplete(fallbackRoute)) {
+      throw new Error('fallback summarization provider and model must be set together')
+    }
+    if (routeIsConfigured(fallbackRoute) && routesEqual(route, fallbackRoute)) {
+      throw new Error('fallback summarization route must differ from the primary route')
+    }
+    if (rolling.pressureFoldTokens > rolling.foldBatchTokens) {
+      throw new Error(`pressureFoldTokens (${rolling.pressureFoldTokens}) must not exceed foldBatchTokens (${rolling.foldBatchTokens})`)
+    }
+    if (rolling.hardActiveTokens <= rolling.softActiveTokens) {
+      throw new Error(`hardActiveTokens (${rolling.hardActiveTokens}) must be greater than softActiveTokens (${rolling.softActiveTokens})`)
+    }
+    this.rollingConfig = rolling
+    this.fallbackSummarizationRoute = fallbackRoute
+    this.config = {
+      ...this.config,
+      summarizationProvider: route.provider,
+      summarizationModel: route.model,
     }
   }
 

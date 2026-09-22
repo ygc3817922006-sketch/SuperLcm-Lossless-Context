@@ -30,10 +30,12 @@ export function errorChain(error) { return [{ message: error instanceof Error ? 
 function node() {
   const self = {
     _default: undefined,
+    _volatile: false,
     default(value) { self._default = value; return self },
     min() { return self },
     max() { return self },
     step() { return self },
+    volatile() { self._volatile = true; return self },
   }
   return self
 }
@@ -44,6 +46,9 @@ export default {
   percent() { return node() },
   union(list) { const n = node(); n._list = list; return n },
   const(value) { const n = node(); n._value = value; return n },
+  array(inner) { const n = node(); n._inner = inner; return n },
+  boolean() { return node() },
+  intersect(list) { const n = node(); n._list = list; return n },
 }
 `],
   ['@deepseek-ai/dsh-compaction', `
