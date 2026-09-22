@@ -103,16 +103,14 @@ SQLite 是可重建的派生索引，不是第二套会话真源。删掉 SQLite
 
 Web profile：
 
-```bash
-dsh plugin --profile web add \
-  "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
+```text
+dsh plugin --profile web add "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
 ACP profile：
 
-```bash
-dsh plugin --profile acp add \
-  "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
+```text
+dsh plugin --profile acp add "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
 不要在正式 DSH profile 目录中手工执行未经检查的 `pnpm add`，以免额外安装一份 DSH 核心包。使用 `dsh plugin --profile ... add` 让 DSH 管理 profile 依赖。

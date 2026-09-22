@@ -102,16 +102,14 @@ Runtime code contains no macOS or `/Users/...` assumptions. Database paths resol
 
 Web profile:
 
-```bash
-dsh plugin --profile web add \
-  "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
+```text
+dsh plugin --profile web add "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
 ACP profile:
 
-```bash
-dsh plugin --profile acp add \
-  "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
+```text
+dsh plugin --profile acp add "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
 Do not run unchecked `pnpm add` commands inside a production profile. Use `dsh plugin --profile ... add` so DSH manages profile dependencies and avoids duplicate core package instances.
@@ -148,12 +146,14 @@ Default database path:
 ~/.dsh/SuperLcm/lcm.sqlite
 ```
 
-Overrides:
+Portable overrides:
 
-```bash
-export DSH_HOME=/custom/dsh/home
-export DSH_SUPERLCM_DB=/absolute/path/lcm.sqlite
-```
+| Variable | Meaning |
+| --- | --- |
+| `DSH_HOME` | DSH home directory; SuperLcm stores `SuperLcm/lcm.sqlite` below it. |
+| `DSH_SUPERLCM_DB` | Explicit SQLite file path for the current operating system. |
+
+Set these with the native environment-variable mechanism of your shell or service manager; no POSIX-only command is required.
 
 The database uses WAL mode and stores summaries, DAG edges, exact source sequence arrays, provider/model metadata, and a full-text index. It does not store duplicated raw event payloads.
 
