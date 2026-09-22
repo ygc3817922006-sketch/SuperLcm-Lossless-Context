@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'SuperLcm')
-  assert.equal(pkg.version, '0.3.0-alpha.11')
+  assert.equal(pkg.version, '0.3.0-alpha.12')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -40,7 +40,11 @@ test('web settings expose an atomic catalog-backed summarizer route and rolling 
   assert.match(client, /remote\.session\.modelCatalog\(\)/)
   assert.match(client, /const inject = \[[^\]]*"remote\.session"[^\]]*\]/)
   assert.match(client, /configForms\.get\(/)
-  assert.match(client, /discoverEngineEntry/)
+  // 条目发现必须走 describe 镜像的快照接口，而不是把 describe() 当数组遍历。
+  assert.match(client, /findEngineEntry/)
+  assert.match(client, /describeFace\.getSnapshot\(\)/)
+  assert.match(client, /describeFace\.ensure\(/)
+  assert.match(client, /describeFace\.subscribe\(/)
   assert.doesNotMatch(client, /settingsScope/)
   assert.match(client, /foldBatchTokens:\s*64000/)
   assert.match(client, /softActiveTokens:\s*160000/)

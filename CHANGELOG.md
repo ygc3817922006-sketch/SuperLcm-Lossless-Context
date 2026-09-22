@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.3.0-alpha.11 — 2026-09-22
+## 0.3.0-alpha.12 — 2026-09-22
+
+- 修复设置页完全不工作、参数不显示：`configForms.describe()` 返回的是 describe 镜像（`getSnapshot`/`subscribe`/`ensure`），不是命名空间数组；alpha.11 把它当数组遍历，直接抛 `namespaces is not iterable`，导致整个组合包配置页挂掉。
+- 引擎条目改为在镜像快照就绪后按 schema 字段特征发现，并用 `subscribe` + 重渲染跟随；镜像尚无答案时显示「加载中」，不再误报「设置服务不可用」。
+- 新增 `test/client-contract.test.js`：用最小 React 运行时把浏览器组合包真正渲染一遍，覆盖条目发现、未就绪态与摘要视图；该用例在 alpha.11 上稳定复现线上故障。
+- Fix the bundle configuration page rendering nothing: `configForms.describe()` returns the describe mirror, not a namespace array, so alpha.11 threw `namespaces is not iterable`. The engine entry is now discovered from the mirror snapshot with schema-based matching.
+
+## 0.3.0-alpha.11 — 2026-09-22 — 2026-09-22
 
 - 适配 DSH 0.1.7：宿主侧 `settings.installSection()` 已被官方删除，改为在引擎 `Config` 上声明 `.volatile()` 字段并监听 `loader/volatile-update`，设置变更继续热更新运行中的引擎实例。
 - Web 客户端 `settingsScope` 服务改名为 `configForms`，`bind({namespace})` 改为 `get(entryId)`；表单按引擎条目 id（约定 `SuperLcm-engine`）寻址，路由字段拆为宿主 Config 的标量 `summarizationProvider/Model` 与 `fallbackSummarizationProvider/Model`，主/备用路由切换改用一次 `mutate()` 原子提交。
