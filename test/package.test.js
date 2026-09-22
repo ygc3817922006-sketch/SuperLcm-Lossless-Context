@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'SuperLcm')
-  assert.equal(pkg.version, '0.3.0-alpha.12')
+  assert.equal(pkg.version, '0.3.0-alpha.13')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',

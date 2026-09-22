@@ -122,6 +122,26 @@ function renderFully(miniReact, Component, props) {
   return tree
 }
 
+/** 收集渲染树里所有带 style 的宿主元素。 */
+function collectStyledElements(node, out = []) {
+  if (!node || typeof node !== 'object') return out
+  if (Array.isArray(node)) {
+    for (const child of node) collectStyledElements(child, out)
+    return out
+  }
+  if (typeof node.type === 'string' && node.props?.style) out.push(node)
+  collectStyledElements(node.props?.children, out)
+  return out
+}
+
+/** CSS `font` 简写会重置 font-size；与字号长属性同处一个 style 对象即字号失控。 */
+function mixesFontShorthand(style) {
+  const hasShorthand = Object.prototype.hasOwnProperty.call(style, 'font')
+  const hasLonghand = ['fontSize', 'lineHeight', 'fontWeight', 'fontFamily'].some((k) =>
+    Object.prototype.hasOwnProperty.call(style, k))
+  return hasShorthand && hasLonghand
+}
+
 function collectText(node, out) {
   if (node === undefined || node === null || typeof node === 'boolean') return out
   if (typeof node === 'string' || typeof node === 'number') {
@@ -259,4 +279,50 @@ test('client renders the one-line summary without touching the form', async () =
   const tree = renderFully(miniReact, registered[0].Component, { ...injected, view: 'summary' })
   const text = collectText(tree, []).join(' ')
   assert.equal(text.trim(), 'intro')
+})
+
+test('no rendered style mixes the font shorthand with a font longhand', async () => {
+  const miniReact = createMiniReact()
+  const module = await loadClient(miniReact)
+  const { ctx, registered } = buildContext({
+    miniReact,
+    namespaces: [
+      { ns: 'SuperLcm-compaction', schema: realSchemaEnvelope(), value: {}, applies: 'live', secrets: [], revision: 1, autoGenerate: true },
+    ],
+  })
+  module.apply(ctx)
+  const injected = registered[0].options.inject()
+  const tree = renderFully(miniReact, registered[0].Component, { ...injected, view: 'page' })
+
+  const styled = collectStyledElements(tree)
+  assert.ok(styled.length > 0, 'expected styled host elements')
+  const offenders = styled.filter((el) => mixesFontShorthand(el.props.style)).map((el) => el.type)
+  assert.deepEqual(offenders, [], 'font shorthand would reset the inherited size on: ' + offenders.join(', '))
+})
+
+test('form controls pin both the family and the size instead of inheriting them', async () => {
+  const miniReact = createMiniReact()
+  const module = await loadClient(miniReact)
+  const { ctx, registered } = buildContext({
+    miniReact,
+    namespaces: [
+      { ns: 'SuperLcm-compaction', schema: realSchemaEnvelope(), value: {}, applies: 'live', secrets: [], revision: 1, autoGenerate: true },
+    ],
+  })
+  module.apply(ctx)
+  const injected = registered[0].options.inject()
+  const tree = renderFully(miniReact, registered[0].Component, { ...injected, view: 'page' })
+
+  const controls = collectStyledElements(tree).filter((el) => ['input', 'select', 'button'].includes(el.type))
+  assert.ok(controls.some((el) => el.type === 'select'), 'expected the route selector')
+  assert.ok(controls.some((el) => el.type === 'button'), 'expected action buttons')
+  for (const control of controls) {
+    // 主题会把 --dsh-content-font-size 设成用户字号（例如 15px）；控件若靠继承就会比官方大一截。
+    assert.equal(typeof control.props.style.fontSize, 'number',
+      control.type + ' must pin an explicit font size')
+    assert.equal(control.props.style.fontFamily, 'inherit',
+      control.type + ' must keep the app font family')
+    assert.ok(control.props.style.fontSize <= 14,
+      control.type + ' must not exceed the official control size')
+  }
 })

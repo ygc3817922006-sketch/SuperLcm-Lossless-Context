@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.3.0-alpha.12 — 2026-09-22
+## 0.3.0-alpha.13 — 2026-09-22
+
+- 修复设置页字号与官方不一致（控件偏大）：`inputStyle`/`buttonStyle` 同时写了 `fontSize: 13` 和 `font: "inherit"`，而 `font` 简写排在后面，会把字号重置成继承值（主题的 `--dsh-content-font-size`，本机为 15px）。控件于是按 15px 渲染，比周围官方文字大一圈。
+- 控件一律改为只写长属性（`fontFamily: "inherit"` + 显式 `fontSize`），并按官方口径对齐：行标签 14px/600、输入与按钮 14px、次级链接 13px、说明 12px。
+- 新增两条渲染期断言：样式对象不得混用 `font` 简写与字号长属性；`input`/`select`/`button` 必须同时固定字族与字号且不超过官方控件字号（14px）。两条断言在 alpha.12 上均失败。
+- Fix the settings page typography: the `font: "inherit"` shorthand came after `fontSize`, resetting controls to the inherited size (15px). Controls now use longhands only and match the official sizes.
+
+## 0.3.0-alpha.12 — 2026-09-22 — 2026-09-22
 
 - 修复设置页完全不工作、参数不显示：`configForms.describe()` 返回的是 describe 镜像（`getSnapshot`/`subscribe`/`ensure`），不是命名空间数组；alpha.11 把它当数组遍历，直接抛 `namespaces is not iterable`，导致整个组合包配置页挂掉。
 - 引擎条目改为在镜像快照就绪后按 schema 字段特征发现，并用 `subscribe` + 重渲染跟随；镜像尚无答案时显示「加载中」，不再误报「设置服务不可用」。
