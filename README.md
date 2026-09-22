@@ -8,7 +8,7 @@
 
 **SuperLcm 是 DeepSeek Harness（DSH）的异步上下文压缩与无损召回插件。**它不把一段长对话永久替换成一个不可追溯的扁平摘要，而是保留 DSH 原始事件日志，建立分层摘要 DAG，并让 Agent 在需要时搜索、定位、展开之前的精确上下文。
 
-> 当前版本：`0.3.0-alpha.9`。这是公开 alpha；建议固定 DSH 与插件版本，在独立 profile 验证后再启用到主工作区。
+> `main` 当前版本：`0.3.0-alpha.10`；最新公开 Release 仍为 `0.3.0-alpha.9`。建议固定 DSH 与插件版本，在独立 profile 验证后再启用到主工作区。
 
 <p align="center">
   <a href="https://www.losslesscontext.ai/">

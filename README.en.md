@@ -8,7 +8,7 @@
 
 **SuperLcm is an asynchronous context-compaction and lossless-recall plugin for DeepSeek Harness (DSH).** Instead of permanently replacing a long conversation with one opaque flat summary, it preserves DSH's original event log, builds a hierarchical summary DAG, and lets the Agent search and expand exact earlier context on demand.
 
-> Current version: `0.3.0-alpha.9`. This is a public alpha. Pin DSH and SuperLcm versions in a dedicated profile before enabling it in a primary workspace.
+> Current `main` version: `0.3.0-alpha.10`; the latest public Release remains `0.3.0-alpha.9`. Pin DSH and SuperLcm versions in a dedicated profile before enabling it in a primary workspace.
 
 <p align="center">
   <a href="https://www.losslesscontext.ai/">
