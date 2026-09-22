@@ -1,105 +1,280 @@
 # SuperLcm
 
-[English](./README.en.md) · [项目介绍页](https://ygc3817922006-sketch.github.io/SuperLcm/) · [发布版本](https://github.com/ygc3817922006-sketch/SuperLcm/releases)
+[English](./README.en.md) · [Releases](https://github.com/ygc3817922006-sketch/SuperLcm/releases) · [LCM 论文](https://papers.voltropy.com/LCM)
 
-这是一个面向 DeepSeek Harness（DSH）的 SuperLcm 无损召回上下文插件，核心思路来自 Lossless Claw / SuperLcm Management（LCM，无损上下文管理）。
+[![CI](https://github.com/ygc3817922006-sketch/SuperLcm/actions/workflows/ci.yml/badge.svg)](https://github.com/ygc3817922006-sketch/SuperLcm/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ygc3817922006-sketch/SuperLcm?include_prereleases)](https://github.com/ygc3817922006-sketch/SuperLcm/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-它把 **DSH 只追加的 Session Event Log（会话事件日志）作为唯一原文真源**。每次压缩摘要都会获得稳定的召回节点 ID；SQLite 只保存摘要 DAG（有向无环图）、父子关系和精确的源事件序号。模型以后可以搜索、描述和展开旧上下文，而不是把摘要冒充成原文。
+**SuperLcm 是 DeepSeek Harness（DSH）的异步上下文压缩与无损召回插件。**它不把一段长对话永久替换成一个不可追溯的扁平摘要，而是保留 DSH 原始事件日志，建立分层摘要 DAG，并让 Agent 在需要时搜索、定位、展开之前的精确上下文。
 
-> 当前版本：`0.3.0-alpha.9`。这是公开 alpha；请把 DSH 与插件版本固定在独立 profile 中验证后再用于主工作区。
+> 当前版本：`0.3.0-alpha.9`。这是公开 alpha；建议固定 DSH 与插件版本，在独立 profile 验证后再启用到主工作区。
 
-## 为什么做 SuperLcm
+<p align="center">
+  <a href="https://www.losslesscontext.ai/">
+    <img src="https://www.losslesscontext.ai/og-card.png" alt="LCM 官方交互式动态讲解" width="900">
+  </a>
+</p>
+<p align="center"><strong>点击上图打开论文团队的 LCM 官方交互式动态讲解</strong></p>
 
-传统压缩通常等上下文接近上限后，暂停当前请求并生成一个扁平摘要。这会让用户等待摘要完成，让活动上下文长期偏大，也容易因频繁改写开头而破坏 Prompt Cache。
+官方页面并不是一个独立的 MP4/WebM 视频，而是由网页脚本驱动的滚动交互动画；GitHub README 不能运行外部网页脚本。因此这里直接加载官方预览并链接到原始动态页面，同时在仓库内提供一份原生 GIF，把 SuperLcm 实际采用的流程完整展示出来：
 
-SuperLcm 的目标是：
+![SuperLcm LCM 原理动画](./assets/lcm-principle.gif)
 
-1. **异步压缩，不阻塞对话**：提前选择安全历史区间，用独立 provider/model 在后台生成摘要；当前 Agent 不等待这个任务。
-2. **保持较小的活动上下文**：模型少读无关旧历史，保留更多输出余量，降低长上下文注意力稀释风险。
-3. **保护缓存前缀**：system message 和已提交 checkpoint 逐字冻结，后续只压缩其后的原文。
-4. **降低 token 与缓存成本**：较短请求减少每轮输入 token；稳定前缀提高 Prompt Cache 复用并减少重复 cache write。具体收益取决于模型提供方的计费规则。
+## 目录
 
-## LCM 原理
+- [五个核心目标](#五个核心目标)
+- [LCM 的原理](#1-lcm-的原理)
+- [全面异步压缩](#2-全面异步压缩不阻塞对话)
+- [为什么保持较少上下文](#3-持续保持较少的活动上下文)
+- [缓存优化与缓存成本](#4-缓存优化与更低的缓存成本)
+- [为什么是无损召回](#5-lcm-怎么做到无损并拉回以前的上下文)
+- [SQLite 里到底放了什么](#sqlite-里到底放了什么)
+- [召回工具](#召回工具)
+- [安装与启用](#安装与启用)
 
-SuperLcm 受 Clint Ehrlich 与 Theodore Blackman 的论文 **[LCM: Lossless Context Management](https://papers.voltropy.com/LCM)** 启发。论文使用分层摘要 DAG 管理长历史，同时为每个摘要保留通向原始消息的指针。
+## 五个核心目标
 
-推荐先查看论文团队制作的 **[LCM 官方交互式动态讲解](https://www.losslesscontext.ai/)**：它用滚动动画展示传统扁平压缩、fresh tail、增量摘要、摘要聚合以及按需展开。论文另见 [arXiv:2605.04050](https://arxiv.org/abs/2605.04050)。
+1. **展示并实现 LCM 原理**：原文永久留在 DSH 事件日志中；摘要形成层级 DAG；摘要节点保留精确源事件指针。
+2. **异步压缩，不阻塞对话**：独立 Worker 和独立模型在后台准备摘要，当前 Agent 回复不等待压缩模型。
+3. **持续保持较少的活动上下文**：旧历史进入 checkpoint，主模型只携带稳定摘要、必要原文和 fresh tail。
+4. **缓存更稳定、成本更低**：冻结 system/checkpoint 前缀，减少前缀重写；更短的活动请求也减少输入 token 与 cache write 体积。
+5. **摘要可搜索，原文可精确取回**：SQLite 只做可重建索引，`lcm_expand` 最终返回的是 DSH 原始事件，而不是摘要的二次转述。
 
-在 DSH 中，Event Log 是不可变原文真源；活动上下文只携带冻结前缀、摘要 checkpoint 和最近原文；SQLite 保存可重建的 DAG 与精确事件序号；召回工具在需要时回到原始事件。
+---
 
-## 已实现
+## 1. LCM 的原理
 
-- 原始会话只由 DSH 保存，SQLite 不复制整份 transcript（会话记录）。
-- 继承 DSH 官方 `BasicCompactionEngine`，只改摘要 seam（扩展接口）与 rolling 自动触发策略。
-- 为摘要加入稳定、机器可读的召回标记并形成分层摘要 DAG。
-- 使用 `(session_id, node_id)` 复合身份，父会话和 fork（分叉）子会话不会互相覆盖。
-- 按事件序号精确追回原始事件；单个超大事件也可连续分页，不丢中段。
-- 只增量索引完整成功的压缩事务；SQLite 损坏或删除后，可从 DSH 会话事件日志显式重建。
-- 提供 `lcm_grep`、`lcm_describe`、`lcm_expand`、`lcm_expand_query`、`lcm_reindex`、`lcm_doctor` 六个召回与修复工具。
+SuperLcm 受 Clint Ehrlich 与 Theodore Blackman 的论文 **[LCM: Lossless Context Management](https://papers.voltropy.com/LCM)** 启发。推荐先看论文团队制作的 **[官方交互式动态讲解](https://www.losslesscontext.ai/)**；论文也可在 [arXiv:2605.04050](https://arxiv.org/abs/2605.04050) 阅读。
 
-## 压缩模型
-
-压缩摘要可以使用与主 Agent 不同的模型。插件直接复用 DSH 官方 `BasicCompactionEngine` 的 `summarizationProvider` / `summarizationModel` 路由，不建立第二套路由系统。
-
-在 WebUI → Plugin configuration → SuperLcm 中可以直接填写：
+传统压缩通常是：
 
 ```text
-压缩 Provider: openai
-压缩 Model:    gpt-5.6-sol
+原始消息 1 … 100  ──压缩──>  一个扁平摘要
+                                  │
+                                  └─ 摘要遗漏的细节通常无法再定位
 ```
 
-自动压缩必须明确配置 provider/model 两项。留空或只填一项都会被拒绝；后台任务绝不回退到当前 Agent 或 custom-subagent 的模型。保存后对后续压缩立即生效，无需重启插件。
+LCM 的方式是：
 
-## 全面异步滚动压缩
+```text
+DSH append-only event log（原始真源，始终保留）
+   │
+   ├─ events 101–130 ─> S0-A ─┐
+   ├─ events 131–160 ─> S0-B ─┼─> S1-A ─┐
+   ├─ events 161–190 ─> S0-C ─┘         ├─> 更高层摘要
+   └─ recent events ─────────────────────┘
 
-SuperLcm 只支持一种自动策略：`mode: "rolling"`、`foldTiming: "background"`。阻塞式 `sync` 和旧的同步 `threshold` 模式都会被拒绝。
+每个摘要节点都保留：node_id、child_ids、source event seqs
+```
 
-默认至少原样保留最近 24 个 surface node（表面节点）和 32k token。安全的 64k 原文批次可立刻交给独立 Worker 后台生成摘要，但 ready 结果先不进入 surface，直到 160k soft-cap、220k hard-cap 或 overflow 要求缩减。提交后，最前面的 system message 和此前已经提交的 checkpoint 都冻结为逐字不变的前缀；以后只压它们后面的原文。只有 hard pressure 才允许低频合并冻结摘要。准备与提交都不阻塞当前回复。
+这意味着上下文可以递归压缩，但不是把过去抹掉：
 
-后台 Worker 先固定选区快照，使用插件配置的独立模型和独立 AbortController 生成摘要；完成后只在选区与 token-meter 快照仍稳定时提交。期间允许尾部继续增长；若选区被改写，则丢弃结果并稍后重新准备。提交仍写入标准持久事件：`compaction/start`、`compaction/summary`、替换用 `user/message`、`compaction/end`。
+- 低层摘要覆盖一段原始事件；
+- 高层摘要可以覆盖多个低层摘要；
+- 每一层都保留向下的 DAG 边；
+- 最底层节点保留精确的 DSH `event.seq`；
+- 需要细节时，Agent 沿节点和序号回到原始事件。
 
-完整策略与 GPT-5.6 Sol 推荐起始值见 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
+SuperLcm 不把摘要当成原文。摘要负责**导航和筛选**，DSH Event Log 才是最终证据。
 
-## 缓存优化
+---
 
-SuperLcm 不猜 Prompt Cache 的 TTL。提交后的 system 和 checkpoint 形成最长逐字稳定前缀；普通压缩只处理它们后面的 raw history。只有硬压力且后段已经无法释放足够空间时，才允许低频合并旧 checkpoint。
+## 2. 全面异步压缩：不阻塞对话
+
+传统同步压缩把“等摘要模型完成”放在用户请求的关键路径上。上下文越长、压缩模型越慢，用户越容易看到明显停顿。
+
+SuperLcm 的自动压缩只接受：
+
+```yaml
+mode: rolling
+foldTiming: background
+```
+
+完整流程：
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant A as 当前 Agent
+    participant W as 后台压缩 Worker
+    participant S as DSH Session Log
+    participant DB as SQLite 索引
+
+    U->>A: 继续对话
+    A-->>U: 正常回复，不等待压缩
+    A->>W: 提交稳定历史快照
+    W->>W: 独立 provider/model 生成摘要
+    W->>S: 原子写入 start → summary → checkpoint → end
+    S->>DB: 成功事务完成后增量索引
+```
+
+关键点：
+
+- **当前回复不 await 摘要模型。**自动压缩路径不会把后台模型耗时加到当前对话延迟里。
+- **使用独立 provider/model。**后台任务绝不偷偷回退到当前 Agent 或 custom-subagent 的模型。
+- **独立 AbortController。**当前请求结束不会无条件取消已经安全启动的摘要工作。
+- **先固定快照，再生成摘要。**尾部可以继续增长；如果选中的历史区间被改写，结果会被丢弃并重新准备，不会覆盖错误范围。
+- **提交是原子的。**只接受完整的 `compaction/start → compaction/summary → checkpoint user/message → compaction/end` 生命周期。
+- **压缩计算本身并没有凭空变快。**节省的是用户等待压缩的时间：计算提前在后台完成，离开当前回复的关键路径。
+
+默认策略会原样保留最近 24 个 surface node 和至少 32k fresh token；64k 左右的安全历史批次可以提前在后台准备。ready 摘要只有在 soft/hard pressure 或 overflow 需要释放上下文时才提交到活动 surface。
+
+---
+
+## 3. 持续保持较少的活动上下文
+
+长上下文容量大，不等于每一轮都应该把所有历史重新发送给模型。
+
+SuperLcm 把上下文分为三部分：
+
+```text
+冻结前缀：SYSTEM + CHECKPOINT 01 + CHECKPOINT 02 + …
+可压缩区：较新的 raw history
+新鲜尾部：最近消息、工具调用和当前任务状态
+```
+
+好处：
+
+- **减少无关历史干扰。**模型更容易聚焦当前目标、约束和最近证据。
+- **保留输出空间。**输入越小，留给推理、工具结果和最终回答的 token 余量越大。
+- **降低长上下文注意力稀释。**旧细节不是消失，而是从“每轮强制携带”变成“相关时按需拉取”。
+- **延迟更稳定。**每轮输入不再随着会话历史无限线性增长。
+- **重要细节仍能回来。**摘要命中后，通过 `lcm_expand` 读取精确原始事件。
+
+这里的目标不是把上下文压到越小越好，而是在 **fresh tail、当前任务完整性和旧历史可召回**之间保持有界平衡。
+
+---
+
+## 4. 缓存优化与更低的缓存成本
+
+Prompt Cache 最依赖的是**从请求开头开始逐字一致的最长前缀**。如果每次压缩都重写最前面的摘要，后面的内容即使相同，也可能因为前缀变化而无法复用。
+
+SuperLcm 使用冻结前缀：
 
 ```text
 SYSTEM · CHECKPOINT 01 · CHECKPOINT 02 │ RAW HISTORY │ FRESH TAIL
-└──────────── 逐字冻结，可持续命中缓存 ────────────┘
+└──────────── 逐字冻结的缓存前缀 ────────────┘
 ```
 
-较短的活动请求减少每轮输入 token；稳定前缀减少重复缓存写入。实际缓存命中和费用仍由所用模型提供方决定。
+规则：
 
-## 与 gbrain 的边界
+1. system message 不进入普通折叠范围；
+2. 已提交 checkpoint 默认不再改写；
+3. 新一轮压缩只处理冻结前缀之后的 raw history；
+4. 只有硬上限压力、且后段历史已经无法释放足够空间时，才允许低频合并旧 checkpoint；
+5. 不猜测供应商 Prompt Cache 的 TTL，也不依赖“等缓存变冷再压缩”。
 
-`SuperLcm` 管“本次 DSH 工作线程到底发生过什么”；gbrain 管跨会话、跨项目的稳定结论、历史决策和长期知识。两边不应自动双写。只有主代理确认某个结论已经稳定，才应通过单独流程沉淀到 gbrain。
+成本收益来自两部分：
 
-## “无损”的准确含义
+- **更稳定的前缀**：提高已有 Prompt Cache 内容继续命中的机会，减少反复 cache write；
+- **更短的活动上下文**：每轮发送的输入 token、更改后的 uncached tail 和新写入缓存的体积都更小。
 
-无损的是原始 DSH 事件及其精确召回路径，不是摘要文本本身：
+具体命中率、读缓存价格、写缓存价格和 TTL 由模型提供方决定，因此项目不宣称一个虚假的固定节省百分比。
+
+---
+
+## 5. LCM 怎么做到无损，并拉回以前的上下文
+
+### “无损”的准确含义
+
+无损的是**原始事件可恢复性和来源链**，不是摘要文本本身逐字包含所有细节。
 
 ```text
-摘要节点 → 精确 source event seq → DSH 原始事件
+摘要 checkpoint
+   │  marker: node_id + child_ids
+   ▼
+SQLite DAG node
+   │  source_seqs: [101, 102, 103, ...]
+   ▼
+DSH append-only Session Event Log
+   │
+   └─ 精确原始 JSON 事件
 ```
 
-SQLite 是可重建的派生索引，不是第二套会话真源。删掉 SQLite 会失去索引，但不会删掉 DSH 原文；运行 `lcm_reindex` 可以从完整成功的压缩事务恢复。`lcm_doctor` 默认只读，只有显式传入 `repair: true` 才重建。
+每个提交后的摘要都会附带版本化机器标记：
+
+```text
+<!-- dsh-lcm:v1:<base64url-json> -->
+```
+
+标记中包含稳定 `node_id` 和子摘要 `child_ids`。真正的原始事件序号来自成功的 DSH 压缩事务，而不是相信摘要文本里任意声称的 ID。SuperLcm 只从具有真实 compact-checkpoint source 的事件建立父子边，避免用户文本伪造 DAG。
+
+### 从摘要拉回原文
+
+1. Agent 用 `lcm_grep` 搜索摘要和/或原始事件；
+2. 用 `lcm_describe` 查看节点层级、父子关系和源事件范围；
+3. 用 `lcm_expand` 根据 `source_seqs` 从当前 DSH Session Event Log 读取原始 JSON 事件；
+4. 单个事件太大时，通过 `source_offset` 与 `event_char_offset` 继续分页，直到 `next = null`；
+5. `lcm_expand_query` 可以先搜索多个摘要，再在一个共享字符预算内展开最相关原文。
+
+因此主上下文可以只保留摘要，但旧消息、工具调用和结构化事件仍可精确回来。
+
+### 为什么 SQLite 损坏也不会丢原文
+
+DSH Event Log 是唯一原文真源；SQLite 是可删除、可重建的派生索引。SuperLcm 只索引完整成功的压缩生命周期：
+
+```text
+compaction/start
+    ↓
+compaction/summary（带 marker 和 shadowedSeqs）
+    ↓
+user/message checkpoint（真实 compact source）
+    ↓
+compaction/end（无 error）
+    ↓
+写入 SQLite
+```
+
+不完整、失败、source 不匹配的事务不会进入索引。SQLite 丢失后，`lcm_reindex` 可以重新扫描 DSH 日志并恢复节点、边和精确序号。
+
+---
+
+## SQLite 里到底放了什么
+
+默认数据库：
+
+```text
+~/.dsh/SuperLcm/lcm.sqlite
+```
+
+路径按当前操作系统解析，可用 `DSH_SUPERLCM_DB` 指定完整路径，或通过 `DSH_HOME` 改变 DSH 主目录；运行时代码使用 Node.js `node:path` 和 `node:os.homedir()`，没有 macOS 专用路径。
+
+| 表/索引 | 内容 | 是否存原始 transcript |
+| --- | --- | --- |
+| `lcm_nodes` | summary JSON/text、node ID、child IDs、source seqs、事件范围、模型、provider、状态 | 否 |
+| `lcm_edges` | 当前 session 内的 parent → child DAG 边 | 否 |
+| `lcm_nodes_fts` | 摘要文本的 FTS5 全文索引 | 否 |
+| `lcm_scan_state` | 每个 session 的增量扫描高水位 | 否 |
+| `lcm_index_state` | 旧版 committed-end cursor 的兼容迁移状态 | 否 |
+
+数据库启用 WAL、事务写入和 `(session_id, node_id)` 复合身份：
+
+- 父会话和 fork 子会话不会互相覆盖；
+- 节点、边和 FTS 行一起事务更新；
+- SQLite 失败不会回滚已经成功写入的 DSH canonical transaction；
+- `lcm_doctor` 默认只读，只有显式 `repair: true` 才重建派生索引。
+
+---
+
+## 召回工具
+
+| 工具 | 用途 |
+| --- | --- |
+| `lcm_grep` | 搜索摘要、原始事件或两者 |
+| `lcm_describe` | 查看节点摘要、层级、来源、父子关系和模型信息 |
+| `lcm_expand` | 按精确序号恢复原始事件，支持大事件分页 |
+| `lcm_expand_query` | 搜索摘要并在共享预算内展开相关原文 |
+| `lcm_reindex` | 从 DSH 事件日志增量刷新或重建 SQLite |
+| `lcm_doctor` | 检查 DAG、指针、缺失节点、悬空边和 SQLite 完整性 |
+
+---
 
 ## 安装与启用
 
-需要 Node.js 22.16 以上，并要求当前 DSH 版本仍提供：
+要求 Node.js 22.16+，并要求当前 DSH 仍提供官方 compaction、LLM、tools 和 session/event 接口。
 
-- `@deepseek-ai/dsh-compaction-basic`
-- `@deepseek-ai/dsh-compaction`
-- `@deepseek-ai/dsh-llm`
-- `@deepseek-ai/dsh-tools`
-- `session/event` 生命周期
-
-### 跨平台路径
-
-运行时代码不包含 macOS 或 `/Users/...` 硬编码。数据库路径按当前操作系统解析：优先使用 `DSH_SUPERLCM_DB`，其次使用 `DSH_HOME/SuperLcm/lcm.sqlite`，最后使用系统用户目录下的 `.dsh/SuperLcm/lcm.sqlite`。路径由 Node.js `node:path` 与 `node:os.homedir()` 处理。CI 覆盖 Windows、Linux、macOS 的 Node.js 22，并在 Linux 上额外覆盖 Node.js 24。
-
-### 从公开 Release 安装
+### 安装公开 Release
 
 Web profile：
 
@@ -113,32 +288,15 @@ ACP profile：
 dsh plugin --profile acp add "https://github.com/ygc3817922006-sketch/SuperLcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
-不要在正式 DSH profile 目录中手工执行未经检查的 `pnpm add`，以免额外安装一份 DSH 核心包。使用 `dsh plugin --profile ... add` 让 DSH 管理 profile 依赖。
+### 安全启用
 
-### 第一阶段：只挂召回工具
-
-```yaml
-- insert:
-    - id: SuperLcm-tools
-      name: SuperLcm/tool
-```
-
-### 第二阶段：替换正式压缩提供方
-
-同一个隔离 Agent 上只能保留一套 `ctx.compaction`。应在现有 compaction 节点上把插件名替换为：
+发布包内的 `cordis.patch.yml` 默认只挂载六个召回工具，不会自动再挂一个压缩提供方。启用 SuperLcm 压缩时，应当**替换现有 compaction provider，而不是并排追加第二个 provider**。
 
 ```yaml
 name: SuperLcm
-```
-
-不能把它和 `dsh-compaction-basic` 并排追加。现有节点 ID、隔离层级和已验证的基础配置应尽量保持不变。GPT-5.6 Sol 的持久 Worker 推荐参数见 [`examples/enable-compaction.patch.yml`](./examples/enable-compaction.patch.yml)。
-
-## 默认持久 Worker 参数
-
-```yaml
 mode: rolling
-summarizationProvider: ""
-summarizationModel: ""
+summarizationProvider: openai
+summarizationModel: gpt-5.6-sol
 tailCount: 24
 minRetainTokens: 32000
 pressureFoldTokens: 20000
@@ -148,33 +306,19 @@ hardActiveTokens: 220000
 foldTiming: background
 ```
 
-其中 160k/220k 是面向 GPT-5.6 Sol 的起始值，不应不加判断地复制给小上下文模型。`activeTokens` 使用 DSH canonical token meter（规范令牌计量器）的整份真实请求估算，不只是消息正文。
+160k/220k 是面向大上下文模型的起始值，不应直接复制给小上下文模型。完整策略见 [缓存策略](./docs/CACHE_POLICY.md)，启用前验收步骤见 [VALIDATION.md](./docs/VALIDATION.md)。
 
-## 数据库
-
-默认路径：
+## 开发验证
 
 ```text
-~/.dsh/SuperLcm/lcm.sqlite
-```
-
-数据库启用 WAL（预写日志），保存摘要节点、DAG 边、源事件序号、模型/提供方信息和全文索引，不保存整份原始事件正文。
-
-## 开发验收
-
-```bash
 npm run validate
 npm pack --dry-run
 ```
 
-自动测试覆盖无损召回合同、rolling 选区、soft/hard 非阻塞处理、独立取消信号、分阶段事务稳定性、同步模式拒绝，以及独立压缩模型设置校验与热更新。当前测试仍不等于正式 DSH 桌面端全链路证书；alpha 版在正式 profile 启用前必须跑真实 Agent loop（代理循环）验收。
-
-## 架构
-
-见 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) 与 [`docs/CACHE_POLICY.md`](./docs/CACHE_POLICY.md)。
+CI 覆盖 Windows、Linux、macOS 的 Node.js 22，并在 Linux 上额外覆盖 Node.js 24。自动测试不等于所有 DSH 版本的真实 Agent-loop 认证；正式 profile 应固定版本并完成一次真实压缩、召回、fork 隔离和重启验收。
 
 ## 许可证与署名
 
 MIT。详见 [LICENSE](./LICENSE) 与 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
 
-SuperLcm 是独立项目，不隶属于 Voltropy、Martian Engineering 或 DeepSeek；仓库没有复制 LCM、Lossless Claw 或 DSH 的源文件。
+SuperLcm 是独立项目，不隶属于 Voltropy、Martian Engineering 或 DeepSeek。仓库没有复制 LCM 官方交互站点、Lossless Claw 或 DSH 的源代码；README 通过官方公开 URL 展示其预览卡片，并明确链接回原始交互页面。

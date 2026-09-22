@@ -32,9 +32,9 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## SuperLcm public alpha / 公开测试版
 
-          中文默认、可切换英文的项目页现已上线。本版本重点介绍 LCM 原理、两阶段异步压缩、较小活动上下文、稳定缓存前缀与成本边界，并加入 Windows、Linux、macOS CI。
+          仓库根 README 是默认中文、可切换英文的详细项目介绍。本版本重点说明 LCM 原理、全面异步压缩、较小活动上下文、稳定缓存前缀、SQLite 无损召回与成本边界，并加入 Windows、Linux、macOS CI。
 
-          The Chinese-default bilingual project site is now available. This release documents the LCM foundation, two-phase asynchronous compaction, bounded active context, prefix-stable caching, and provider-dependent cost savings, with CI on Windows, Linux, and macOS.
+          The repository README is the Chinese-default bilingual project home. It documents the LCM foundation, fully asynchronous compaction, bounded active context, prefix-stable caching, SQLite-backed exact recall, provider-dependent cost savings, and CI on Windows, Linux, and macOS.
 
           > Install into a dedicated DSH profile and follow the validation guide before enabling it in a primary workspace.
           NOTES

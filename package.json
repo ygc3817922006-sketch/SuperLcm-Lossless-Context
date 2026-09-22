@@ -15,7 +15,8 @@
   "files": [
     "lib/",
     "src/",
-    "docs/",
+    "docs/*.md",
+    "assets/",
     "examples/",
     "README.md",
     "README.en.md",
@@ -63,7 +64,7 @@
   "bugs": {
     "url": "https://github.com/ygc3817922006-sketch/SuperLcm/issues"
   },
-  "homepage": "https://ygc3817922006-sketch.github.io/SuperLcm/",
+  "homepage": "https://github.com/ygc3817922006-sketch/SuperLcm#readme",
   "license": "MIT",
   "engines": {
     "node": ">=22.16.0"

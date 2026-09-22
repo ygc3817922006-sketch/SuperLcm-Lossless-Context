@@ -2,10 +2,11 @@
 
 ## 0.3.0-alpha.9 — 2026-09-21
 
-- 新增默认中文、可切换英文的公开项目页，引用 LCM 原论文与官方交互式动态讲解，并详细说明两阶段异步压缩、较小活动上下文、冻结前缀缓存与成本边界。
-- 公共安装文档改用 DSH profile 命令；根 README 默认中文并保留完整英文版，新增平台兼容矩阵与安全报告策略。
+- 仓库根 README 改为默认中文的详细项目介绍：直接展示 LCM 官方预览并链接交互式动态讲解，同时加入仓库原生 LCM 流程动画。
+- 详细说明异步压缩为什么不阻塞回复、较小活动上下文的收益、冻结前缀 Prompt Cache 策略、缓存成本边界，以及 DSH Event Log + SQLite DAG 的无损召回链。
+- 公共安装文档改用 DSH profile 命令；保留完整英文版、平台兼容矩阵与安全报告策略，不再部署独立项目站。
 - 移除测试中的 POSIX `/tmp` 假设，CI 扩展到 Windows、Linux、macOS；运行时继续只使用 Node.js 跨平台路径解析，不包含本机 `/Users/...` 硬编码。
-- Add a Chinese-default bilingual public site, LCM paper/visual references, portable install docs, and Windows/Linux/macOS CI coverage.
+- Make the repository README the bilingual project home, embed an original LCM flow animation, link the official interactive explainer, and document async compaction, cache economics, exact recall, and SQLite storage.
 
 ## 0.3.0-alpha.8 — 2026-09-21
 

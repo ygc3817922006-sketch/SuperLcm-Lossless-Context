@@ -65,21 +65,30 @@ test('default bundle is safe: tools are mounted but no second compaction provide
 test('publication list contains documentation and excludes tests and transient databases', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.ok(pkg.files.includes('src/'))
-  assert.ok(pkg.files.includes('docs/'))
+  assert.ok(pkg.files.includes('docs/*.md'))
+  assert.ok(!pkg.files.includes('docs/'))
+  assert.ok(pkg.files.includes('assets/'))
   assert.ok(pkg.files.includes('examples/'))
   assert.ok(pkg.files.includes('README.en.md'))
   assert.ok(!pkg.files.includes('test/'))
   assert.ok(!pkg.files.some(value => value.endsWith('.sqlite')))
 })
 
-test('public site defaults to Chinese, offers English, and uses portable install guidance', async () => {
-  const [page, script, store] = await Promise.all([text('docs/index.html'), text('docs/site.js'), text('src/store.js')])
-  assert.match(page, /<html lang="zh-CN">/)
-  assert.match(page, /data-set-lang="zh"/)
-  assert.match(page, /data-set-lang="en"/)
-  assert.match(page, /losslesscontext.ai/)
-  assert.match(page, /dsh plugin --profile web add/)
-  assert.ok(script.includes("localStorage.getItem('superlcm-language')||'zh'"))
+test('repository README is the Chinese-first detailed project page', async () => {
+  const [readme, english, store, animation] = await Promise.all([
+    text('README.md'),
+    text('README.en.md'),
+    text('src/store.js'),
+    readFile(join(root, 'assets/lcm-principle.gif')),
+  ])
+  assert.match(readme, /^# SuperLcm/m)
+  assert.match(readme, /losslesscontext\.ai/)
+  assert.match(readme, /assets\/lcm-principle\.gif/)
+  assert.match(readme, /全面异步压缩/)
+  assert.match(readme, /SQLite 里到底放了什么/)
+  assert.match(readme, /lcm_expand/)
+  assert.doesNotMatch(readme, /github\.io/)
+  assert.equal(animation.subarray(0, 6).toString('ascii'), 'GIF89a')
   assert.doesNotMatch(store, /\/Users\//)
   assert.doesNotMatch(store, /process\.platform\s*===\s*['"]darwin/)
 })
