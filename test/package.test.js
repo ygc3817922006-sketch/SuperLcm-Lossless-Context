@@ -39,7 +39,8 @@ test('web settings expose an atomic catalog-backed summarizer route and rolling 
   assert.match(client, /fallbackSummarizerHeading/)
   assert.match(client, /remote\.session\.modelCatalog\(\)/)
   assert.match(client, /const inject = \[[^\]]*"remote\.session"[^\]]*\]/)
-  assert.match(client, /configForms\.get\(ENGINE_ENTRY_ID\)/)
+  assert.match(client, /configForms\.get\(/)
+  assert.match(client, /discoverEngineEntry/)
   assert.doesNotMatch(client, /settingsScope/)
   assert.match(client, /foldBatchTokens:\s*64000/)
   assert.match(client, /softActiveTokens:\s*160000/)
@@ -50,7 +51,7 @@ test('web settings expose an atomic catalog-backed summarizer route and rolling 
   assert.match(client, /scope\.mutate\(/)
   assert.match(client, /plugins\.bundle\.config/)
   assert.match(client, /key:\s*"SuperLcm"/)
-  assert.match(client, /ENGINE_ENTRY_ID = "SuperLcm-engine"/)
+  assert.doesNotMatch(client, /ENGINE_ENTRY_ID/)
   assert.doesNotMatch(client, /settings\.plugin\.item/)
 })
 
