@@ -1,3 +1,4 @@
+# SuperLcm — Lossless Context
 
 > Claude Code CLI / Claude Desktop 适配预览版：[接入方法、隐私与边界](./docs/CLAUDE.md)。在原生压缩之外提供分层摘要与原文召回，不替换原生压缩。
 

@@ -1,3 +1,4 @@
+# SuperLcm — Lossless Context
 
 > Claude Code CLI / Claude Desktop adapter preview: [setup, privacy and limitations](./docs/CLAUDE.md). It adds layered recall alongside Claude native compaction; it does not replace native compaction.
 
