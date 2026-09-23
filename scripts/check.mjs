@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const roots = ['src', 'lib', 'test', 'scripts']
+const roots = ['src', 'lib', 'test', 'scripts', 'claude']
 const files = []
 
 async function walk(relative) {

@@ -13,7 +13,7 @@ async function text(path) {
 test('package exports the backend and all stable library leaves', async () => {
   const pkg = JSON.parse(await text('package.json'))
   assert.equal(pkg.name, 'SuperLcm')
-  assert.equal(pkg.version, '0.3.0-alpha.13')
+  assert.equal(pkg.version, '0.3.0-alpha.14')
   assert.deepEqual(pkg.exports, {
     '.': './src/engine.js',
     './tool': './src/tool.js',
@@ -21,6 +21,7 @@ test('package exports the backend and all stable library leaves', async () => {
     './marker': './src/marker.js',
     './store': './src/store.js',
     './client': './lib/client.js',
+    './claude': './claude/cli.js',
   })
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(pkg.dsh.client.platform, 'web')
@@ -68,6 +69,8 @@ test('default bundle is safe: tools are mounted but no second compaction provide
 
 test('publication list contains documentation and excludes tests and transient databases', async () => {
   const pkg = JSON.parse(await text('package.json'))
+  assert.ok(pkg.files.includes('claude/'))
+  assert.equal(pkg.bin['superlcm-claude'], './claude/cli.js')
   assert.ok(pkg.files.includes('src/'))
   assert.ok(pkg.files.includes('docs/*.md'))
   assert.ok(!pkg.files.includes('docs/'))
