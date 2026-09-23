@@ -1,11 +1,5 @@
 # Changelog
 
-## 0.3.0-alpha.14 — 2026-09-23
-
-- 新增独立 Claude Code CLI / Claude Desktop 适配预览：本地 JSONL/显式导入原文，SQLite 索引与分层摘要、精确原文分页展开、MCP 新旧协议、可选后台 hook 触发。
-- Claude 原生压缩仍由宿主管理；摘要模型必须明确选择并启用，默认不调用外部模型。普通 Desktop 聊天不承诺自动读取完整历史。
-- Add an opt-in Claude adapter with local exact-source recall, hierarchical summaries, modern/legacy MCP transport, and documented host boundaries.
-
 ## 0.3.0-alpha.13 — 2026-09-22
 
 - 修复设置页字号与官方不一致（控件偏大）：`inputStyle`/`buttonStyle` 同时写了 `fontSize: 13` 和 `font: "inherit"`，而 `font` 简写排在后面，会把字号重置成继承值（主题的 `--dsh-content-font-size`，本机为 15px）。控件于是按 15px 渲染，比周围官方文字大一圈。

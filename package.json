@@ -1,6 +1,6 @@
 {
   "name": "SuperLcm",
-  "version": "0.3.0-alpha.14",
+  "version": "0.3.0-alpha.13",
   "description": "SuperLcm — Lossless Context for DeepSeek Harness: fully asynchronous, cache-friendly compaction with exact recall.",
   "type": "module",
   "main": "./src/engine.js",
@@ -10,11 +10,9 @@
     "./core": "./src/core.js",
     "./marker": "./src/marker.js",
     "./store": "./src/store.js",
-    "./client": "./lib/client.js",
-    "./claude": "./claude/cli.js"
+    "./client": "./lib/client.js"
   },
   "files": [
-    "claude/",
     "lib/",
     "src/",
     "docs/*.md",
@@ -99,8 +97,5 @@
     "react": {
       "optional": true
     }
-  },
-  "bin": {
-    "superlcm-claude": "./claude/cli.js"
   }
 }

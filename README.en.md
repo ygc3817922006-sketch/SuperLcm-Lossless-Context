@@ -1,7 +1,5 @@
 # SuperLcm — Lossless Context
 
-> Claude Code CLI / Claude Desktop adapter preview: [setup, privacy and limitations](./docs/CLAUDE.md). It adds layered recall alongside Claude native compaction; it does not replace native compaction.
-
 [中文（默认）](./README.md) · [Releases](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/releases) · [LCM paper](https://papers.voltropy.com/LCM)
 
 [![CI](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/actions/workflows/ci.yml/badge.svg)](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/actions/workflows/ci.yml)
@@ -10,7 +8,7 @@
 
 **SuperLcm is an asynchronous context-compaction and lossless-recall plugin for DeepSeek Harness (DSH).** Instead of permanently replacing a long conversation with one opaque flat summary, it preserves DSH's original event log, builds a hierarchical summary DAG, and lets the Agent search and expand exact earlier context on demand.
 
-> Source `package.json` version: `0.3.0-alpha.14`. The Claude adapter is a preview; verify DSH and Claude integration separately. A source version does not imply an installed or published release.
+> Current `main` version: `0.3.0-alpha.10`; the latest public Release remains `0.3.0-alpha.9`. Pin DSH and SuperLcm versions in a dedicated profile before enabling it in a primary workspace.
 
 <p align="center">
   <a href="https://www.losslesscontext.ai/">
