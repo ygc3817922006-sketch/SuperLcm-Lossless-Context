@@ -60,12 +60,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context.git"
+    "url": "git+https://github.com/ygc3817922006-sketch/dsh-superlcm.git"
   },
   "bugs": {
-    "url": "https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/issues"
+    "url": "https://github.com/ygc3817922006-sketch/dsh-superlcm/issues"
   },
-  "homepage": "https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context#readme",
+  "homepage": "https://github.com/ygc3817922006-sketch/dsh-superlcm#readme",
   "license": "MIT",
   "engines": {
     "node": ">=22.16.0"

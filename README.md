@@ -1,9 +1,9 @@
 # SuperLcm — Lossless Context
 
-[English](./README.en.md) · [Releases](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/releases) · [LCM 论文](https://papers.voltropy.com/LCM)
+[English](./README.en.md) · [Releases](https://github.com/ygc3817922006-sketch/dsh-superlcm/releases) · [LCM 论文](https://papers.voltropy.com/LCM)
 
-[![CI](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/actions/workflows/ci.yml/badge.svg)](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/ygc3817922006-sketch/SuperLcm-Lossless-Context?include_prereleases)](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/releases)
+[![CI](https://github.com/ygc3817922006-sketch/dsh-superlcm/actions/workflows/ci.yml/badge.svg)](https://github.com/ygc3817922006-sketch/dsh-superlcm/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ygc3817922006-sketch/dsh-superlcm?include_prereleases)](https://github.com/ygc3817922006-sketch/dsh-superlcm/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 **SuperLcm 是 DeepSeek Harness（DSH）的异步上下文压缩与无损召回插件。**它不把一段长对话永久替换成一个不可追溯的扁平摘要，而是保留 DSH 原始事件日志，建立分层摘要 DAG，并让 Agent 在需要时搜索、定位、展开之前的精确上下文。
@@ -279,13 +279,13 @@ compaction/end（无 error）
 Web profile：
 
 ```text
-dsh plugin --profile web add "https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
+dsh plugin --profile web add "https://github.com/ygc3817922006-sketch/dsh-superlcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
 ACP profile：
 
 ```text
-dsh plugin --profile acp add "https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
+dsh plugin --profile acp add "https://github.com/ygc3817922006-sketch/dsh-superlcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
 ### 安全启用

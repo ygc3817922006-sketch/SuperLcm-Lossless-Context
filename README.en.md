@@ -1,9 +1,9 @@
 # SuperLcm — Lossless Context
 
-[中文（默认）](./README.md) · [Releases](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/releases) · [LCM paper](https://papers.voltropy.com/LCM)
+[中文（默认）](./README.md) · [Releases](https://github.com/ygc3817922006-sketch/dsh-superlcm/releases) · [LCM paper](https://papers.voltropy.com/LCM)
 
-[![CI](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/actions/workflows/ci.yml/badge.svg)](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/ygc3817922006-sketch/SuperLcm-Lossless-Context?include_prereleases)](https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/releases)
+[![CI](https://github.com/ygc3817922006-sketch/dsh-superlcm/actions/workflows/ci.yml/badge.svg)](https://github.com/ygc3817922006-sketch/dsh-superlcm/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ygc3817922006-sketch/dsh-superlcm?include_prereleases)](https://github.com/ygc3817922006-sketch/dsh-superlcm/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 **SuperLcm is an asynchronous context-compaction and lossless-recall plugin for DeepSeek Harness (DSH).** Instead of permanently replacing a long conversation with one opaque flat summary, it preserves DSH's original event log, builds a hierarchical summary DAG, and lets the Agent search and expand exact earlier context on demand.
@@ -199,13 +199,13 @@ Requires Node.js 22.16+ and the DSH compaction, LLM, tools, and session/event AP
 Web profile:
 
 ```text
-dsh plugin --profile web add "https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
+dsh plugin --profile web add "https://github.com/ygc3817922006-sketch/dsh-superlcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
 ACP profile:
 
 ```text
-dsh plugin --profile acp add "https://github.com/ygc3817922006-sketch/SuperLcm-Lossless-Context/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
+dsh plugin --profile acp add "https://github.com/ygc3817922006-sketch/dsh-superlcm/releases/download/v0.3.0-alpha.9/SuperLcm-0.3.0-alpha.9.tgz"
 ```
 
 The bundled `cordis.patch.yml` mounts only the six recall/repair tools. To enable compaction, **replace the existing compaction provider; do not append a second provider beside it.**
