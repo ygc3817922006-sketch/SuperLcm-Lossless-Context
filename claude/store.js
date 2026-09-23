@@ -120,6 +120,14 @@ export class ClaudeStore {
       return actual.raw.toString('utf8')
     } finally { closeSync(fd) }
   }
+  readEvent(session, ordinal, charOffset = 0, maxChars = 12000) {
+    if (!Number.isSafeInteger(ordinal) || ordinal < 0) throw new Error('Invalid event ordinal')
+    if (!Number.isSafeInteger(charOffset) || charOffset < 0) throw new Error('Invalid character offset')
+    const raw = this.exact(session,ordinal), cap = bounded(maxChars,12000,50000)
+    if (charOffset > raw.length) throw new Error('Offset past end of event')
+    const content = raw.slice(charOffset,charOffset+cap)
+    return {session,ordinal,charOffset,content,next:charOffset+content.length < raw.length ? {ordinal,charOffset:charOffset+content.length} : null}
+  }
   eventRows(session) { return this.db.prepare('SELECT ordinal,digest,preview FROM events WHERE session=? ORDER BY ordinal').all(session) }
   nodeRows(session, level) { return this.db.prepare('SELECT * FROM nodes WHERE session=? AND level=? ORDER BY first').all(session, level) }
   node(session, id) { return this.db.prepare('SELECT * FROM nodes WHERE session=? AND id=?').get(session, id) }
@@ -197,8 +205,11 @@ export class ClaudeStore {
 }
 export function importFile(store, path, label) {
   const original = realpathSync(path), st = statSync(original)
+  if (!/\.(jsonl|txt)$/i.test(original)) throw new Error('Import requires .jsonl or .txt source')
   if (!st.isFile() || st.size > 32*1024*1024 || !st.size) throw new Error('Import requires a nonempty regular file of at most 32 MiB')
   const raw = readFileSync(original)
+  if (raw.includes(0)) throw new Error('Binary imports are not supported')
+  new TextDecoder('utf-8',{fatal:true}).decode(raw)
   const digest = hash(raw)
   const isJsonl = original.endsWith('.jsonl')
   if (isJsonl && !raw.toString('utf8').endsWith('\n')) throw new Error('JSONL imports require a final newline')

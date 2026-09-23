@@ -11,6 +11,7 @@ export const tools = [
   {name:'lcm_sessions',description:'List indexed sessions and their source status; find session IDs.',inputSchema:schema()},
   {name:'lcm_overview',description:'Get short layered-summary navigation for one session. Does not replace Claude native context.',inputSchema:schema({session:str('Session ID')},['session'])},
   {name:'lcm_search',description:'Search summary nodes AND indexed original conversation text; verify important claims by expanding exact raw source.',inputSchema:schema({session:str('Session ID'),query:str('Search terms'),limit:int('Hits per section, at most 50')},['session','query'])},
+  {name:'lcm_read_event',description:'Read one indexed original event directly by ordinal, including an unsummarized recent tail. Page with next.charOffset and verify exact source hash.',inputSchema:schema({session:str('Session ID'),ordinal:int('Event ordinal from lcm_search'),char_offset:int('Character offset within event'),max_chars:int('Page budget, max 50000')},['session','ordinal'])},
   {name:'lcm_describe',description:'Inspect one node, its summary, child IDs, parents and original event range.',inputSchema:schema({session:str('Session ID'),node_id:str('Node from lcm_search or lcm_overview')},['session','node_id'])},
   {name:'lcm_expand',description:'Read exact original JSONL events (or imported text), page by next ordinal and charOffset; never infer missing details from summaries.',inputSchema:schema({session:str('Session ID'),node_id:str('Node ID'),ordinal:int('Start event ordinal'),char_offset:int('Character offset within event'),max_chars:int('Page budget, max 50000')},['session','node_id'])},
   {name:'lcm_doctor',description:'Read-only SQLite and source-pointer integrity diagnostics; no repair or deletion.',inputSchema:schema({session:str('Session ID')},['session'])},
@@ -21,7 +22,10 @@ export async function call(store,name,args = {}) {
   const tool=tools.find(t=>t.name===name)
   if (!tool) throw new Error(`Unknown tool: ${name}`)
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Object arguments required')
-  for (const key of tool.inputSchema.required) if (typeof args[key] !== 'string' || !args[key]) throw new Error(`Missing ${key}`)
+  for (const key of tool.inputSchema.required) {
+    const rule = tool.inputSchema.properties[key]
+    if (rule.type === 'string' ? (typeof args[key] !== 'string' || !args[key]) : (rule.type === 'integer' && !Number.isSafeInteger(args[key]))) throw new Error(`Missing or invalid ${key}`)
+  }
   if (name==='lcm_sessions') return store.sources()
   if (name==='lcm_import') {
     if (!process.env.SUPERLCM_IMPORT_DIR) throw new Error('MCP import disabled; use explicit CLI import or set SUPERLCM_IMPORT_DIR')
@@ -35,6 +39,7 @@ export async function call(store,name,args = {}) {
   }
   if (!store.source(args.session)) throw new Error('Unknown session')
   if (name==='lcm_overview') return store.overview(args.session)
+  if (name==='lcm_read_event') return store.readEvent(args.session,args.ordinal,args.char_offset,args.max_chars)
   if (name==='lcm_search') return store.search(args.session,args.query,args.limit)
   if (name==='lcm_describe') return store.describe(args.session,args.node_id)
   if (name==='lcm_expand') return store.expand(args.session,args.node_id,args.ordinal,args.char_offset,args.max_chars)

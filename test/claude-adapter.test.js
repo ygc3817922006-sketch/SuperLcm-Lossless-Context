@@ -36,6 +36,7 @@ test('incremental ingest, layered nodes, exact pagination and idempotence',fixtu
   appendFileSync(source,'}\n')
   assert.equal(store.ingest('session1',source).added,1)
   assert.equal(store.exact('session1',16),'{"type":"assistant"}\n')
+  assert.equal((await call(store,'lcm_read_event',{session:'session1',ordinal:16})).content,'{"type":"assistant"}\n')
 }))
 test('reject source changes, enforce private exact source, import text',fixture(async ({dir,store})=>{
   const src=join(dir,'conversation.txt')
@@ -59,7 +60,7 @@ test('MCP modern discovery, legacy handshake and tools',fixture(async ({store,di
   assert.equal((await send({jsonrpc:'2.0',id:3,method:'tools/list',params:{_meta:meta}})).result.resultType,'complete')
   assert.equal((await send({jsonrpc:'2.0',id:4,method:'tools/call',params:{_meta:meta,name:'lcm_sessions',arguments:{}}})).result.isError,undefined)
   assert.equal((await send({jsonrpc:'2.0',id:5,method:'tools/list',params:{_meta:{...meta,'io.modelcontextprotocol/protocolVersion':'2039-01-01'}}})).error.code,-32022)
-  assert.equal(tools.length,8)
+  assert.equal(tools.length,9)
   assert.deepEqual(await call(store,'lcm_sessions'),[])
   input.end();await new Promise(r=>server.once('close',r));lines.close()
 }))
