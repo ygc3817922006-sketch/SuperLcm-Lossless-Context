@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.3.0-alpha.13 — 2026-09-22
+## 未发布 / Unreleased
+
+- 新增 `scripts/preflight-upgrade.mjs`:dsh 升级前的试飞闸。把候选版本装进隔离目录(不动现役),用「契约面 + 差分测试 + 组合挂载」三层检查,只报候选相对现役**新增**的问题。方法核心是差分:同一套检查同时跑基线与候选,绝对判定会把「测试原本配桩写」的环境性失败误报成 breaking change(实测假警报两次)。
+- 试飞顺带查出并清掉 acp profile 里 codex-connect 删除后遗留的悬空补丁(`- id: llm-openai-codex`,15 行),该补丁此前每次启动都报 `patch: entry "llm-openai-codex" not found`。
+- Added `scripts/preflight-upgrade.mjs`, a differential pre-upgrade gate: contract surface, differential tests, and composition, with the baseline run as the reference so environment-only failures are never reported as regressions.
+
+## 0.3.0-alpha.13 — 2026-09-22 — 2026-09-22
 
 - 修复设置页字号与官方不一致（控件偏大）：`inputStyle`/`buttonStyle` 同时写了 `fontSize: 13` 和 `font: "inherit"`，而 `font` 简写排在后面，会把字号重置成继承值（主题的 `--dsh-content-font-size`，本机为 15px）。控件于是按 15px 渲染，比周围官方文字大一圈。
 - 控件一律改为只写长属性（`fontFamily: "inherit"` + 显式 `fontSize`），并按官方口径对齐：行标签 14px/600、输入与按钮 14px、次级链接 13px、说明 12px。

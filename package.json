@@ -46,7 +46,8 @@
     "test": "node ./scripts/test.mjs",
     "check": "node ./scripts/check.mjs",
     "validate": "npm run check && npm test",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "preflight": "node scripts/preflight-upgrade.mjs"
   },
   "keywords": [
     "deepseek-harness",
