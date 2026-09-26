@@ -23,7 +23,7 @@
  * 退出码:0 = 未发现新增不兼容;1 = 发现;2 = 环境/前置失败
  */
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -147,6 +147,28 @@ function differentialTests(modules, label) {
   return { failures, raw: result.out }
 }
 
+/**
+ * L4:现役后台进程是否比磁盘上的包旧。
+ *
+ * 这一层来自一次真实事故:包升级了但后台没重启,旧进程仍按旧插件清单提供服务,
+ * 而页面文件已是新版 —— 新版本新增的服务(如 shortcuts)不在旧清单里,
+ * 于是整片客户端插件全部 pending。组合检查发现不了它,只有比时间能发现。
+ */
+function staleProcesses(modules) {
+  const packages = ['dsh', 'dsh-web-app'].map((name) => join(modules, name, 'package.json')).filter(existsSync)
+  if (packages.length === 0) return { checked: false, reason: '找不到安装包' }
+  const installedAt = Math.max(...packages.map((file) => statSync(file).mtimeMs))
+  const listing = run('ps', ['-axo', 'pid,lstart,command']).out
+  const rows = listing.split('\n').filter((line) => /\bdsh\b.*(web|tui|acp|headless)/.test(line) && !/dsh plugin/.test(line))
+  const stale = []
+  for (const row of rows) {
+    const pid = row.trim().split(/\s+/)[0]
+    const started = new Date(row.trim().split(/\s+/).slice(1, 6).join(' ')).getTime()
+    if (Number.isFinite(started) && started < installedAt) stale.push(pid)
+  }
+  return { checked: true, installedAt: new Date(installedAt).toISOString(), running: rows.length, stale }
+}
+
 /** L3:用候选 CLI 组合一个真实 profile,确认条目仍在且退出码为 0。 */
 function composition(modules, profile) {
   const cli = join(modules, 'dsh', 'lib', 'bin.js')
@@ -164,13 +186,17 @@ const args = process.argv.slice(2)
 const asJson = args.includes('--json')
 const profileIndex = args.indexOf('--profile')
 const profile = profileIndex >= 0 ? args[profileIndex + 1] : 'acp'
-let version = args.find((arg) => !arg.startsWith('--') && arg !== profile)
+/** 可选:改指别的安装目录(用于自检/验证其它 profile)。 */
+const modulesFlag = args.indexOf('--modules')
+let version = args.find((arg, index) =>
+  !arg.startsWith('--') && arg !== profile && (modulesFlag < 0 || index !== modulesFlag + 1))
 if (args.includes('--latest') || version === undefined) {
-  const tags = run('npm', ['view', '@deepseek-ai/dsh', 'dist-tags', '--json']).out
-  version = JSON.parse(tags).next ?? JSON.parse(tags).alpha
+  const raw = run('npm', ['view', '@deepseek-ai/dsh', 'dist-tags', '--json']).out
+  const tags = JSON.parse(raw.slice(Math.max(0, raw.search(/[{\[]/))))
+  version = tags.next ?? tags.alpha
 }
 
-const baseline = baselineModules()
+const baseline = modulesFlag >= 0 ? args[modulesFlag + 1] : baselineModules()
 const candidate = join(WORK, version, 'node_modules', '@deepseek-ai')
 if (!existsSync(join(candidate, 'schemastery'))) {
   mkdirSync(join(WORK, version), { recursive: true })
@@ -224,6 +250,11 @@ report.tests = {
   newFailures: newFailures.length,
   fixedFailures: fixedFailures.length,
 }
+const liveness = staleProcesses(baseline)
+report.live = liveness
+if (liveness.checked && liveness.stale.length > 0) {
+  report.regressions.push(`现役后台进程比已安装的包旧(PID ${liveness.stale.join(', ')}):升级后必须重启服务,否则旧进程会按旧插件清单服务新版页面文件(实测:22 个客户端插件全部 pending,页面打不开)`)
+}
 report.composition = composition(candidate, profile)
 if (report.composition.exit !== 0) report.regressions.push(`组合 ${profile} profile 退出码 ${report.composition.exit}`)
 if (report.composition.superLcmRows === 0) report.regressions.push(`组合结果里找不到 SuperLcm 条目`)
@@ -237,6 +268,9 @@ if (asJson) {
   console.log(`基类 Config 字段: ${baseFindings.baseConfigKeys.length} -> ${candFindings.baseConfigKeys.length}`)
   console.log(`测试失败(环境因素,两边都有属正常): ${report.tests.baselineFailures} -> ${report.tests.candidateFailures}`)
   console.log(`组合 ${profile}: exit=${report.composition.exit} SuperLcm 条目=${report.composition.superLcmRows}`)
+  if (liveness.checked) {
+    console.log(`现役进程: 运行中 ${liveness.running} 个, 比包旧 ${liveness.stale.length} 个`)
+  }
   console.log(report.regressions.length === 0 ? '\n✅ 未发现新增不兼容,可以升级' : '\n❌ 发现新增不兼容:')
   for (const item of report.regressions) console.log('   ' + item)
   for (const item of report.warnings) console.log('   (提示) ' + item)
